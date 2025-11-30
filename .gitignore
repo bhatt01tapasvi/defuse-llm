@@ -1,0 +1,51 @@
+# Model weights and checkpoints
+*.pkl
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+
+# Large datasets
+datasets/
+llm_weights/
+results/
+scripts/
+testing/
+lora_ft/
+logs/
+llm_refs/
+lib/
+image_classifiers/
+dense_ft/
+benchmarks/
+INSTALL.md
+LICENSE
+main_opt.py
+main.py
+README.md
+*.jsonl
+*.json.gz
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+*.cache
