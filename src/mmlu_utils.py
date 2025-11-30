@@ -29,6 +29,7 @@ CHOICES = ["A", "B", "C", "D"]
 
 def get_mmlu_prompt(subject):
     try:
+        prompt = ""  # ✅ INITIALIZE THIS!
         
         # Load the dataset
         dataset = load_dataset("cais/mmlu", subject, split="test")

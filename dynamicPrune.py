@@ -359,6 +359,7 @@ def main():
         )
 
     # Tokenize and run prompt
+    #TODO: We need a check that the prompt length shouldn't exceed the model's max sequence length.
     prompt_text, all_tokens = initialize_prompt(
         tokenizer=tokenizer,
         device=device,
