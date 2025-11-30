@@ -9,9 +9,6 @@ import os
 import json
 import argparse
 from datetime import datetime
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = SCRIPT_DIR
