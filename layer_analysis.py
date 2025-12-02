@@ -237,6 +237,13 @@ def parse_layer_specification(layer_spec, num_layers):
 def main():
     parser = argparse.ArgumentParser(description='Run layer-wise pruning analysis')
     parser.add_argument('--model', type=str, default='gpt2', help='Model name/path')
+    parser.add_argument('--prompt_type', type=str, default="custom", 
+                       help='Type of prompt: mmlu, custom')
+    parser.add_argument('--prompt_subject', type=str, default="imc",
+                       help='Prompt subject name: Custom :: imc, imc2, imc3, imc_para, imc2_para, imc_word, '
+                            'pizzas, pizzas_para, pizzas_word, actress, actress_para, actress_word, '
+                            'astrophysics, astro_word, maths' \
+                            ' | MMLU :: college_computer_science, machine_learning, electrical_engineering, business_ethics, world_religions, prehistory, moral_disputes')
     parser.add_argument('--num_layers', type=int, default=None, 
                        help='Number of layers')
     parser.add_argument('--keep_rates', nargs='+', type=float, 
@@ -260,6 +267,12 @@ def main():
                             '  "(1-5,7,10-13),(20-25,26,27)" for group mode (prune groups together)')
     parser.add_argument('--exp_name', type=str, default=None,
                        help='Experiment name (auto-generated if not specified)')
+    
+    parser.add_argument('--ppl_datasets', nargs='+', default=["custom","mmlu"], help='Datasets for perplexity eval. Options: custom(imc,anne_corpus,food_corpus), mmlu')
+    parser.add_argument('--ppl_subjects', nargs='+', default=["imc"], help='Subjects for perplexity eval. Options: imc,anne_corpus,food_corpus,mmlu_subjects')
+    parser.add_argument('--mmlu_datasets', nargs='+', default=["college_computer_science", "machine_learning", "electrical_engineering", "business_ethics", "world_religions", "prehistory", "moral_disputes"], help='Datasets for mmlu eval')
+    
+    
     args = parser.parse_args()
 
     if args.num_layers is None:

@@ -27,12 +27,22 @@ SUBJECTS = [
 
 CHOICES = ["A", "B", "C", "D"]
 
-def get_mmlu_prompt(subject):
+def get_mmlu_prompt(subject, max_samples=None):
+    """
+    Get MMLU prompts as a LIST of individual question strings.
+    Each element is one complete Q&A pair.
+    
+    Returns:
+        list[str]: List of formatted question-answer pairs
+    """
     try:
-        prompt = ""  # ✅ INITIALIZE THIS!
-        
         # Load the dataset
         dataset = load_dataset("cais/mmlu", subject, split="test")
+        
+        if max_samples:
+            dataset = dataset.select(range(min(max_samples, len(dataset))))
+
+        prompts = []  # Return a list instead of concatenated string
         
         for i in range(len(dataset)):
             item = dataset[i]
@@ -40,137 +50,159 @@ def get_mmlu_prompt(subject):
             choices = item["choices"]
             answer_idx = item["answer"]
             
-            prompt += f"Question {i+1}: {question}\n"
+            # Build individual prompt
+            prompt = f"Question: {question}\n"
             for j, choice in enumerate(choices):
                 prompt += f"{'ABCD'[j]}. {choice}\n"
             
             answer_letter = 'ABCD'[answer_idx]
             answer_text = choices[answer_idx]
-            prompt += f"Answer: {answer_letter}. {answer_text}\n"
+            prompt += f"Answer: {answer_letter}. {answer_text}"
             
-            prompt += "\n"
+            prompts.append(prompt)
         
-        return prompt.strip()
+        return prompts
     
     except Exception as e:
         print(f"Warning: Could not load MMLU dataset for subject '{subject}': {e}")
-        return f"MMLU prompt for subject: {subject}"
-
-def format_example(question, choices, answer=None):
-    """Format a single example (with or without answer)."""
-    prompt = f"Question: {question}\n"
-    for i, choice in enumerate(choices):
-        prompt += f"{CHOICES[i]}. {choice}\n"
-    prompt += "Answer:"
-    if answer is not None:
-        prompt += f" {CHOICES[answer]}\n\n"
-    return prompt
+        return []
 
 
-def format_prompt(question, choices, few_shot_examples=None):
-    """Format prompt with optional few-shot examples."""
-    prompt = ""
+def get_mmlu_prompt_concat(subject, max_samples=None):
+    """
+    Get MMLU prompts as a SINGLE concatenated string.
+    Optionally limit by character count for consistency with custom datasets.
     
-    # Add few-shot examples if provided
-    if few_shot_examples:
-        for ex in few_shot_examples:
-            prompt += format_example(ex["question"], ex["choices"], ex["answer"])
+    Args:
+        subject: MMLU subject name
+        max_samples: Maximum number of questions to include
+        max_chars: Maximum total character length (None = no limit)
     
-    # Add the actual question (without answer)
-    prompt += format_example(question, choices, answer=None)
-    return prompt
+    Returns:
+        str: Concatenated prompts, truncated to max_chars if specified
+    """
+    prompts = get_mmlu_prompt(subject, max_samples)
+    concatenated = "\n\n".join(prompts)
+    
+    return concatenated
+
+## LEGACY CODE NOT NEEDED NOW.
+
+# def format_example(question, choices, answer=None):
+#     """Format a single example (with or without answer)."""
+#     prompt = f"Question: {question}\n"
+#     for i, choice in enumerate(choices):
+#         prompt += f"{CHOICES[i]}. {choice}\n"
+#     prompt += "Answer:"
+#     if answer is not None:
+#         prompt += f" {CHOICES[answer]}\n\n"
+#     return prompt
 
 
-def get_few_shot_examples(subject, shots):
-    """Get few-shot examples from the dev split."""
-    if shots == 0:
-        return None
+# def format_prompt(question, choices, few_shot_examples=None):
+#     """Format prompt with optional few-shot examples."""
+#     prompt = ""
     
-    dev_dataset = load_dataset("cais/mmlu", subject, split="dev", cache_dir=MMLU_DATASETS_DIR)
+#     # Add few-shot examples if provided
+#     if few_shot_examples:
+#         for ex in few_shot_examples:
+#             prompt += format_example(ex["question"], ex["choices"], ex["answer"])
     
-    # Take up to 'shots' examples from dev set
-    num_examples = min(shots, len(dev_dataset))
-    examples = []
-    for i in range(num_examples):
-        examples.append({
-            "question": dev_dataset[i]["question"],
-            "choices": dev_dataset[i]["choices"],
-            "answer": dev_dataset[i]["answer"]
-        })
-    return examples
+#     # Add the actual question (without answer)
+#     prompt += format_example(question, choices, answer=None)
+#     return prompt
 
-def get_answer_logprobs(model, tokenizer, prompt, device):
-    """Get log probabilities for each answer choice (A, B, C, D)."""
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits[:, -1, :]
-        probs = torch.softmax(logits, dim=-1)
-    
-    choice_probs = []
-    for choice in CHOICES:
-        token_id = tokenizer.encode(choice, add_special_tokens=False)[0]
-        print(f"Token id for choice '{choice}': {token_id}")
-        choice_probs.append(probs[0, token_id].item())
 
-    max_prob = np.argmax(probs[0].cpu().numpy())
-    print(f"========models max prob token id: {max_prob}")
-    return choice_probs
+# def get_few_shot_examples(subject, shots):
+#     """Get few-shot examples from the dev split."""
+#     if shots == 0:
+#         return None
+    
+#     dev_dataset = load_dataset("cais/mmlu", subject, split="dev", cache_dir=MMLU_DATASETS_DIR)
+    
+#     # Take up to 'shots' examples from dev set
+#     num_examples = min(shots, len(dev_dataset))
+#     examples = []
+#     for i in range(num_examples):
+#         examples.append({
+#             "question": dev_dataset[i]["question"],
+#             "choices": dev_dataset[i]["choices"],
+#             "answer": dev_dataset[i]["answer"]
+#         })
+#     return examples
 
-def evaluate_subject(model, tokenizer, subject, device, max_samples=None, shots=0):
-    """Evaluate model on a single MMLU subject."""
-    dataset = load_dataset("cais/mmlu", subject, split="test", cache_dir=MMLU_DATASETS_DIR)
+# def get_answer_logprobs(model, tokenizer, prompt, device):
+#     """Get log probabilities for each answer choice (A, B, C, D)."""
+#     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     
-    if max_samples:
-        dataset = dataset.select(range(min(max_samples, len(dataset))))
+#     with torch.no_grad():
+#         outputs = model(**inputs)
+#         logits = outputs.logits[:, -1, :]
+#         probs = torch.softmax(logits, dim=-1)
     
-    # Get few-shot examples from dev set
-    few_shot_examples = get_few_shot_examples(subject, shots)
+#     choice_probs = []
+#     for choice in CHOICES:
+#         token_id = tokenizer.encode(choice, add_special_tokens=False)[0]
+#         print(f"Token id for choice '{choice}': {token_id}")
+#         choice_probs.append(probs[0, token_id].item())
+
+#     max_prob = np.argmax(probs[0].cpu().numpy())
+#     print(f"========models max prob token id: {max_prob}")
+#     return choice_probs
+
+# def evaluate_subject(model, tokenizer, subject, device, max_samples=None, shots=0):
+#     """Evaluate model on a single MMLU subject."""
+#     dataset = load_dataset("cais/mmlu", subject, split="test", cache_dir=MMLU_DATASETS_DIR)
     
-    correct = 0
-    total = 0
+#     if max_samples:
+#         dataset = dataset.select(range(min(max_samples, len(dataset))))
     
-    for item in dataset:
-        question = item["question"]
-        choices = item["choices"]
-        label = item["answer"]
+#     # Get few-shot examples from dev set
+#     few_shot_examples = get_few_shot_examples(subject, shots)
+    
+#     correct = 0
+#     total = 0
+    
+#     for item in dataset:
+#         question = item["question"]
+#         choices = item["choices"]
+#         label = item["answer"]
         
-        prompt = format_prompt(question, choices, few_shot_examples)
-        print(prompt)
-        choice_probs = get_answer_logprobs(model, tokenizer, prompt, device)
+#         prompt = format_prompt(question, choices, few_shot_examples)
+#         print(prompt)
+#         choice_probs = get_answer_logprobs(model, tokenizer, prompt, device)
         
-        predicted = np.argmax(choice_probs)
-        print(predicted, label)
-        if predicted == label:
-            correct += 1
-        total += 1
+#         predicted = np.argmax(choice_probs)
+#         print(predicted, label)
+#         if predicted == label:
+#             correct += 1
+#         total += 1
     
-    accuracy = correct / total if total > 0 else 0
-    return accuracy, correct, total
+#     accuracy = correct / total if total > 0 else 0
+#     return accuracy, correct, total
 
 
-def evaluate_mmlu(model, tokenizer, device, subjects=None, max_samples=None, shots=0):
-    """Evaluate model on MMLU benchmark."""
-    if subjects is None:
-        subjects = SUBJECTS
+# def evaluate_mmlu(model, tokenizer, device, subjects=None, max_samples=None, shots=0):
+#     """Evaluate model on MMLU benchmark."""
+#     if subjects is None:
+#         subjects = SUBJECTS
     
-    results = {}
-    total_correct = 0
-    total_questions = 0
+#     results = {}
+#     total_correct = 0
+#     total_questions = 0
     
-    for subject in subjects:
-        accuracy, correct, total = evaluate_subject(model, tokenizer, subject, device, max_samples, shots)
-        results[subject] = {"accuracy": accuracy, "correct": correct, "total": total}
-        total_correct += correct
-        total_questions += total
+#     for subject in subjects:
+#         accuracy, correct, total = evaluate_subject(model, tokenizer, subject, device, max_samples, shots)
+#         results[subject] = {"accuracy": accuracy, "correct": correct, "total": total}
+#         total_correct += correct
+#         total_questions += total
         
-    overall_accuracy = total_correct / total_questions if total_questions > 0 else 0
-    results["overall"] = {
-        "accuracy": overall_accuracy,
-        "correct": total_correct,
-        "total": total_questions
-    }
-    results["shots"] = shots
+#     overall_accuracy = total_correct / total_questions if total_questions > 0 else 0
+#     results["overall"] = {
+#         "accuracy": overall_accuracy,
+#         "correct": total_correct,
+#         "total": total_questions
+#     }
+#     results["shots"] = shots
     
-    return results
+#     return results

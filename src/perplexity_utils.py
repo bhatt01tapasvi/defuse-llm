@@ -1,5 +1,4 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset, load_from_disk
 import math
 import os
@@ -90,7 +89,7 @@ def calculate_perplexity_builtin(model, tokenizer, texts: list[str], max_length:
     
     total_loss = 0.0
     total_tokens = 0
-    
+
     for text in texts:
         if not text.strip():
             continue
@@ -143,36 +142,83 @@ def calculate_perplexity_builtin(model, tokenizer, texts: list[str], max_length:
     return math.exp(total_loss / total_tokens)
 
 def evaluate_on_datasets(
-    model,
-    tokenizer,
-    datasets: list[tuple[str, str, str]],
-    device: str = "cuda",
-    max_samples: int = None,
-    max_length: int = 512
+    model,                              # Pre-trained language model (e.g., GPT-2, LLaMA) for evaluation
+    tokenizer,                          # Tokenizer corresponding to the model (for encoding text)
+    datasets: list[tuple[str, str, str]],  # List of tuples: [(dataset_type, subject/name, path), ...]
+                                        # - dataset_type (str): "custom" for local datasets, "mmlu" for MMLU benchmark
+                                        # - subject/name (str): Dataset identifier (e.g., "imc", "college_computer_science")
+                                        # - path (str): File system path to dataset (used only for "custom" type)
+                                        # Example: [("custom", "imc", "/path/to/imc_dataset"), 
+                                        #           ("mmlu", "college_computer_science", "")]
+    device: str = "cuda",               # Device to run computations on ("cuda" for GPU, "cpu" for CPU)
+    max_samples: int = None,            # Maximum number of samples/documents to evaluate per dataset
+                                        # None = evaluate all available samples
+                                        # Useful for quick testing or limiting computation time
+    max_length_ppl: int = 512           # Maximum sequence length (in tokens) for each evaluation chunk
+                                        # Longer sequences are split into overlapping windows
+                                        # Should not exceed model's max_position_embeddings
+                                        # Typical values: 512 (GPT-2), 2048 (LLaMA-1), 4096 (LLaMA-2)
 ):
-    """Evaluate perplexity across multiple datasets."""
-    results = {}
+    """
+    Evaluate perplexity across multiple datasets.
     
+    Args:
+        model: Pre-trained language model for evaluation
+        tokenizer: Tokenizer for encoding text into tokens
+        datasets: List of dataset tuples, where each tuple contains:
+            - dataset_type: "custom" (local dataset) or "mmlu" (MMLU benchmark)
+            - subject: Dataset identifier/name (e.g., "imc", "college_computer_science")
+            - path: File path (required for "custom", empty string for "mmlu")
+        device: Computation device ("cuda" or "cpu")
+        max_samples: Maximum number of samples to evaluate per dataset (None = all)
+        max_length_ppl: Maximum token length for perplexity calculation chunks
+    
+    Returns:
+        dict: Results dictionary mapping dataset names to perplexity metrics
+            {
+                "custom_imc": {
+                    "manual": 15.23,
+                    "builtin": 15.25,
+                    "difference": 0.02
+                },
+                "mmlu_college_computer_science": {...}
+            }
+    
+    Example:
+        >>> datasets = [
+        ...     ("custom", "imc", "/path/to/imc_dataset"),
+        ...     ("mmlu", "college_computer_science", "")
+        ... ]
+        >>> results = evaluate_on_datasets(
+        ...     model, tokenizer, datasets,
+        ...     device="cuda", max_samples=50, max_length_ppl=512
+        ... )
+    """
+    results = {}
+        
+    if max_length_ppl > model.config.max_position_embeddings:
+        raise ValueError(f"max_length_ppl {max_length_ppl} exceeds model's max_position_embeddings {model.config.max_position_embeddings}")
+
     for dataset in datasets:
         
         try:
             if "custom" == dataset[0]:
                 dataset_path = dataset[2]
-                texts = load_corpus(dataset_path)
+                texts = load_corpus(dataset_path, max_samples=max_samples)
                 print(f"Loaded {len(texts)} documents")
             elif "mmlu" == dataset[0]:
-                texts = get_mmlu_prompt(dataset[1])
+                texts = get_mmlu_prompt(dataset[1], max_samples=max_samples)
                 print(f"Loaded {len(texts)} MMLU questions for subject: {dataset[1]}")
 
             manual_ppl = calculate_perplexity(
                 model, tokenizer, texts,
-                max_length=max_length,
+                max_length=max_length_ppl,
                 device=device
             )
 
             builtin_ppl = calculate_perplexity_builtin(
                 model, tokenizer, texts,
-                max_length=max_length,
+                max_length= max_length_ppl,
                 device=device
             )
             

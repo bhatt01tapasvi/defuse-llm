@@ -10,10 +10,11 @@ from typing import Dict
 import pickle
 import matplotlib.pyplot as plt
 from datasets import config
+import time
 
 from src.neuronDefuser import NeuronDefuser
 from src.perplexity_utils import evaluate_on_datasets
-from src.mmlu_utils import get_mmlu_prompt
+from src.mmlu_utils import get_mmlu_prompt_concat
 from src.general_nlp_utils import evaluate_general_nlp
 from src.hook_setup import setup_hooks_gpt2, setup_hooks_llama
 
@@ -54,7 +55,6 @@ def get_llm(model_name, cache_dir="llm_weights"):
         low_cpu_mem_usage=True, 
         device_map="auto"
     )
-    model.seqlen = model.config.max_position_embeddings 
     return model
 
 def detect_model_type(model):
@@ -135,17 +135,18 @@ def parse_layer_topk(layer_spec: str, num_layers: int, intermediate_size: int) -
     
     return per_layer_topk
 
-def initialize_prompt(tokenizer, device, prompt_type="custom", prompt_length=None, prompt_subject="imc", custom_text=None):
+def initialize_prompt(tokenizer, device, max_seq_len: int, prompt_type="custom", prompt_length=None, prompt_subject="imc", custom_text=None):
     """
     Initialize a prompt based on type and length constraints.
     
     Args:
         tokenizer: Model tokenizer
         device: Device to place tensors on
+        max_seq_len: Maximum sequence length supported by the model
         prompt_type: Type of prompt. Options:
             - "mmlu" (requires prompt_subject parameter)
             - "custom" (requires prompt subject or custom_text parameter)
-        prompt_length: Maximum number of tokens. If None, uses full prompt.
+        prompt_length: Maximum number of tokens. If None, uses full prompt (capped at max_seq_len).
                       If specified, truncates prompt to this length.
         prompt_subject: Prompt subject name (required if prompt_type="mmlu")
         custom_text: Custom text string (required if prompt_type="custom")
@@ -196,7 +197,7 @@ def initialize_prompt(tokenizer, device, prompt_type="custom", prompt_length=Non
     if prompt_type == "mmlu":
         if prompt_subject is None:
             raise ValueError("prompt_subject must be specified when prompt_type='mmlu'")
-        prompt_text = get_mmlu_prompt(prompt_subject)
+        prompt_text = get_mmlu_prompt_concat(prompt_subject)   # We don't pass max_samples because that picks the Question, Choices and Answer sets together.
     elif prompt_type == "custom":
         if prompt_subject is not None:
             if prompt_subject not in custom_prompts:
@@ -211,15 +212,28 @@ def initialize_prompt(tokenizer, device, prompt_type="custom", prompt_length=Non
     # Tokenize the prompt
     tokens = tokenizer.encode(prompt_text, add_special_tokens=True)
     
-    # Apply length constraint if specified
+    # Validate against model's max sequence length
+    if len(tokens) > max_seq_len:
+        print(f"  WARNING: Prompt has {len(tokens)} tokens, which exceeds model's max sequence length of {max_seq_len}")
+        print(f"  Truncating prompt to {max_seq_len} tokens")
+        tokens = tokens[:max_seq_len]
+        prompt_text = tokenizer.decode(tokens)
+    
+    # Apply user-specified prompt_length constraint (if provided)
     if prompt_length is not None:
+        # First, validate that prompt_length doesn't exceed max_seq_len
+        if prompt_length > max_seq_len:
+            print(f"  WARNING: Requested prompt_length ({prompt_length}) exceeds model's max sequence length ({max_seq_len})")
+            print(f"  Using max_seq_len ({max_seq_len}) instead")
+            prompt_length = max_seq_len
+        
+        # Now apply the (validated) prompt_length
         if len(tokens) > prompt_length:
-            print(f"Prompt has {len(tokens)} tokens, truncating to {prompt_length} tokens")
+            print(f"  Prompt has {len(tokens)} tokens, truncating to {prompt_length} tokens")
             tokens = tokens[:prompt_length]
-            # Decode to get the truncated text
             prompt_text = tokenizer.decode(tokens)
         elif len(tokens) < prompt_length:
-            print(f"Prompt has {len(tokens)} tokens (less than requested {prompt_length})")
+            print(f"  Prompt has {len(tokens)} tokens (less than requested {prompt_length})")
     
     # Convert to tensor
     input_ids = torch.tensor([tokens], dtype=torch.long).to(device)
@@ -228,6 +242,8 @@ def initialize_prompt(tokenizer, device, prompt_type="custom", prompt_length=Non
     print(f"  Type: {prompt_type}")
     print(f"  Subject: {prompt_subject}")
     print(f"  Length: {len(tokens)} tokens")
+    print(f"  Model max seq len: {max_seq_len} tokens")
+    
     return prompt_text, input_ids
 
 def main():
@@ -266,7 +282,7 @@ def main():
     #### Perplexity
     parser.add_argument('--eval_perplexity', action='store_true', help='Evaluate perplexity on datasets')
     parser.add_argument('--ppl_datasets', nargs='+', default=["custom","mmlu"], help='Datasets for perplexity eval. Options: custom(imc,anne_corpus,food_corpus), mmlu')
-    parser.add_argument('--ppl_max_samples', type=int, default=50, help='Max samples for perplexity eval')
+    parser.add_argument('--ppl_max_samples', type=int, default=None, help='Max samples for perplexity eval')
     parser.add_argument('--ppl_subjects', nargs='+', default=["imc"], help='Subjects for perplexity eval. Options: imc,anne_corpus,food_corpus,mmlu_subjects')
     #### MMLU
     parser.add_argument('--eval_mmlu', action='store_true', help='Evaluate MMLU benchmark')
@@ -284,8 +300,21 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
+    times = {
+        'start': 0.0,
+        'model_load': 0.0,
+        'prefill': 0.0,
+        'generation': 0.0,
+        'eval_ppl': 0.0,
+        'eval_mmlu': 0.0,
+        'eval_general_nlp': 0.0,
+        'end': 0.0
+    }
+
     print(f"Loading model: {args.model}")
+    times['start'] = time.time()
     model = get_llm(args.model, args.cache_dir)
+    times['model_load'] = time.time() - times['start']
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
 
@@ -359,10 +388,10 @@ def main():
         )
 
     # Tokenize and run prompt
-    #TODO: We need a check that the prompt length shouldn't exceed the model's max sequence length.
-    prompt_text, all_tokens = initialize_prompt(
+    prompt_text, input_ids = initialize_prompt(
         tokenizer=tokenizer,
         device=device,
+        max_seq_len=model.config.max_position_embeddings,
         prompt_type=args.prompt_type,
         prompt_length=args.prompt_length,
         prompt_subject=args.prompt_subject,
@@ -370,15 +399,36 @@ def main():
     )
 
     # Store initial token count for later
-    initial_token_count = all_tokens.shape[1]
-    #I want to write a function here which will generate new tokens step by step using forward pass. There are some differences between
-    #using the forward pass and using the generate function of the model. What were they? I forgot about them.
-    for i in range(args.generation):    
+    initial_token_count = input_ids.shape[1]
+
+    # Prefill Phase
+    start = time.time()
+    with torch.no_grad():
+        outputs = model(input_ids, use_cache=True)
+    times['prefill'] = time.time() - start
+
+    # Decode / Generation Phase
+    start = time.time()
+    past_key_values = outputs.past_key_values
+    all_tokens = input_ids
+    
+    for i in range(args.generation):
+        iter_start = time.time()
         with torch.no_grad():
-            output = model(all_tokens)
-            next_token_logits = output.logits[:, -1, :]
+            outputs = model(
+                all_tokens[:, -1:],
+                past_key_values=past_key_values,
+                use_cache=True
+            )
+            next_token_logits = outputs.logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
             all_tokens = torch.cat([all_tokens, next_token], dim=-1)
+            past_key_values = outputs.past_key_values
+        
+        if i % 10 == 0:
+            print(f"Token {i}: {time.time() - iter_start:.3f}s")
+    
+    times['generation'] = time.time() - start
 
     if args.save_activations:
         os.makedirs(args.save_res_dir, exist_ok=True)
@@ -401,16 +451,23 @@ def main():
 
     # Perf analysis
     if args.eval_perplexity:
+        start_time = time.time()
         evaluate_perplexity(model, tokenizer, device, args.ppl_datasets, args.ppl_subjects, max_samples=args.ppl_max_samples, save_dir=args.save_res_dir)
+        times['eval_ppl'] = time.time() - start_time
     if args.eval_mmlu:
+        start_time = time.time()
         evaluate_mmlu_multi_shot(model, tokenizer, device, args.mmlu_datasets, max_samples=args.mmlu_max_samples, shots=args.mmlu_shots, save_dir=args.save_res_dir)
+        times['eval_mmlu'] = time.time() - start_time
     if args.eval_general_nlp:
+        start_time = time.time()
         evaluate_general_datasets(model, tokenizer, device, max_samples=args.general_nlp_max_samples, datasets=args.general_nlp_datasets, save_dir=args.save_res_dir)
+        times['eval_general_nlp'] = time.time() - start_time
     
     # Remove hooks
     for hook in hooks:
         hook.remove()
 
+    times['end'] = time.time()
     # Printing the input and output statements.
     print("\n" + "="*80)
     print("Generation Results:")
@@ -420,16 +477,31 @@ def main():
     print(f"Initial prompt tokens: {initial_token_count}")
     print(f"Generated tokens: {args.generation}")
     print(f"Total tokens: {all_tokens.shape[1]}")
-    print("-"*80)
-    print(f"Initial prompt:\n{prompt_text[:500]}{'...' if len(prompt_text) > 500 else ''}")
-    print("-"*80)
-    print(f"Complete output:\n{tokenizer.decode(all_tokens[0])}")
-    print("-"*80)
+    #print("-"*80)
+    #print(f"Initial prompt:\n{prompt_text[:500]}{'...' if len(prompt_text) > 500 else ''}")
+    #print("-"*80)
+    #print(f"Complete output:\n{tokenizer.decode(all_tokens[0])}")
+    #print("-"*80)
     if args.generation > 0:
         new_tokens = all_tokens[0][initial_token_count:]
         print(f"Newly generated tokens: {new_tokens.tolist()}")
         print(f"Newly generated text:\n{tokenizer.decode(new_tokens)}")
     print("="*80 + "\n")
+
+    print("\n" + "="*80)
+    print("TIMING SUMMARY")
+    print("="*80)
+    print(f"TIMING_START={times['start']:.3f}")
+    print(f"TIMING_MODEL_LOAD={times['model_load']:.3f}")
+    print(f"TIMING_PREFILL={times['prefill']:.3f}")
+    print(f"TIMING_GENERATION={times['generation']:.3f}")
+    print(f"TIMING_EVAL_PPL={times['eval_ppl']:.3f}")
+    print(f"TIMING_EVAL_MMLU={times['eval_mmlu']:.3f}")
+    print(f"TIMING_EVAL_GENERAL_NLP={times['eval_general_nlp']:.3f}")
+    print(f"TIMING_END={times['end']:.3f}")
+    print(f"TIMING_TOTAL={times['end'] - times['start']:.3f}")
+    print("="*80 + "\n")
+
     if args.maskingStep is not None:
         if args.save_res_dir is not None:
             os.makedirs(args.save_res_dir, exist_ok=True)
@@ -469,7 +541,8 @@ def evaluate_perplexity(model, tokenizer, device, perplexity_datasets, perplexit
         model, tokenizer,
         datasets=datasets_to_eval,
         device=device,
-        max_samples=max_samples
+        max_samples=max_samples,
+        max_length_ppl=1024
     )
         
     # Save perplexity results to a dedicated file
@@ -498,18 +571,10 @@ def evaluate_mmlu_multi_shot(model, tokenizer, device, subjects, max_samples=Non
     print(f"Tasks: {task_names}")
     print(f"Max samples per task: {max_samples if max_samples else 'All'}")
 
-    # results = evaluate_mmlu(
-    #     model, tokenizer,
-    #     device=device,
-    #     subjects=subjects,
-    #     max_samples=max_samples,
-    #     shots=shots
-    # )
-
     wrapped_model = HFLM(
         pretrained=model,      # Your edited model with hooks
         tokenizer=tokenizer,   # Your tokenizer
-        batch_size=1,          # Keep at 1 for safety with hooks
+        batch_size=32,          # Keep at 1 for safety with hooks
         device=str(device)
     )
 
@@ -518,7 +583,7 @@ def evaluate_mmlu_multi_shot(model, tokenizer, device, subjects, max_samples=Non
         model_args=None,  # Not needed since we're passing the model directly
         tasks=task_names,
         num_fewshot=shots,
-        batch_size=1,  # Keep at 1 to avoid issues with your hooks
+        batch_size=32,  # Keep at 1 to avoid issues with your hooks
         device=str(device),
         limit=max_samples,  # Limit samples per task (None = all samples)
         log_samples=True,  # Set True if you want detailed sample-level results

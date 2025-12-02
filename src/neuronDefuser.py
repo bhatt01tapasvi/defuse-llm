@@ -126,26 +126,45 @@ class NeuronDefuser:
         if self.maskingStep is None:
             return activations3  # No masking step defined, return unchanged
         
+        if self.currIteration > self.maskingStep:
+            if layer_name in self.masks and self.masks[layer_name] is not None:
+                return activations3 * self.masks[layer_name]
+            return activations3
+
         batch_size, seq_len, hidden_dim = activations3.shape
         activations = activations3[0]
-
-        total_neurons = hidden_dim
 
         if self.currIteration == 0:
             # Multiply activations with proxy values (broadcasting)
             last_gen_forward_proxy_max = torch.abs(activations) * self.forward_proxies_max[layer_name]
             last_gen_forward_proxy_mean = torch.abs(activations) * self.forward_proxies_mean[layer_name]
             
+            seq_length = last_gen_forward_proxy_max.shape[0]
+
+            weights = self.ema_decay ** torch.arange(seq_length - 1, -1, -1, 
+                                                  dtype=torch.float32, 
+                                                  device=self.device)
+
+            weights = weights / weights.sum()
+            self.ema_max[layer_name] = torch.sum(
+                last_gen_forward_proxy_max * weights.unsqueeze(1), 
+                dim=0
+            )
+            self.ema_mean[layer_name] = torch.sum(
+                last_gen_forward_proxy_mean * weights.unsqueeze(1), 
+                dim=0
+            )
+
             # Update the EMA
             # Initialize EMA on first call
-            for token_idx in range(last_gen_forward_proxy_max.shape[0]):
-                # I am skipping the if approach for now because the first token usually is a pretty
-                if token_idx == 0:
-                    self.ema_max[layer_name] = (1 - self.ema_decay) * last_gen_forward_proxy_max[token_idx].clone()
-                    self.ema_mean[layer_name] = (1 - self.ema_decay) * last_gen_forward_proxy_mean[token_idx].clone()
-                else:
-                    self.ema_max[layer_name] = self.ema_decay * self.ema_max[layer_name] + (1 - self.ema_decay) * last_gen_forward_proxy_max[token_idx]
-                    self.ema_mean[layer_name] = self.ema_decay * self.ema_mean[layer_name] + (1 - self.ema_decay) * last_gen_forward_proxy_mean[token_idx]
+            # for token_idx in range(last_gen_forward_proxy_max.shape[0]):
+            #     # I am skipping the if approach for now because the first token usually is a pretty
+            #     if token_idx == 0:
+            #         self.ema_max[layer_name] = (1 - self.ema_decay) * last_gen_forward_proxy_max[token_idx].clone()
+            #         self.ema_mean[layer_name] = (1 - self.ema_decay) * last_gen_forward_proxy_mean[token_idx].clone()
+            #     else:
+            #         self.ema_max[layer_name] = self.ema_decay * self.ema_max[layer_name] + (1 - self.ema_decay) * last_gen_forward_proxy_max[token_idx]
+            #         self.ema_mean[layer_name] = self.ema_decay * self.ema_mean[layer_name] + (1 - self.ema_decay) * last_gen_forward_proxy_mean[token_idx]
         
         elif self.currIteration <= self.maskingStep: # When currIter == maskingStep, we make the final update and mask, then don't compute ema again.
             # Multiply activations with proxy values (broadcasting)
@@ -156,9 +175,11 @@ class NeuronDefuser:
             self.ema_max[layer_name] = self.ema_decay * self.ema_max[layer_name] + (1 - self.ema_decay) * last_gen_forward_proxy_max
             self.ema_mean[layer_name] = self.ema_decay * self.ema_mean[layer_name] + (1 - self.ema_decay) * last_gen_forward_proxy_mean
 
+        is_last_layer = (layer_name == list(self.forward_proxies_max.keys())[-1])
+        
         # Keep a count of the iteration we are at.
         if self.currIteration < self.maskingStep:
-            if layer_name == list(self.forward_proxies_max.keys())[-1]:
+            if is_last_layer:
                 self.currIteration += 1
             return activations3
         elif self.currIteration == self.maskingStep:
@@ -181,21 +202,21 @@ class NeuronDefuser:
                 topk_values, topk_indices = torch.topk(combined_score, layer_topk)
                 
                 # Create mask: keep only top-K neurons
-                mask = torch.zeros(total_neurons, dtype=torch.float32, device=self.device)
+                mask = torch.zeros(hidden_dim, dtype=torch.float16, device=self.device)
                 mask[topk_indices] = 1.0
                 self.masks[layer_name] = mask
                 
                 # Store detailed statistics
                 self.neuron_stats[layer_name] = {
                     'layer_number': layer_num,
-                    'total_neurons': total_neurons,
+                    'total_neurons': hidden_dim,
                     'neurons_kept': layer_topk,
-                    'neurons_pruned': total_neurons - layer_topk,
-                    'pruning_percentage': ((total_neurons - layer_topk) / total_neurons) * 100,
+                    'neurons_pruned': hidden_dim - layer_topk,
+                    'pruning_percentage': ((hidden_dim - layer_topk) / hidden_dim) * 100,
                 }
                 
         # Increment iteration counter
-        if layer_name == list(self.forward_proxies_max.keys())[-1]:
+        if is_last_layer:
             self.currIteration += 1
 
         # Apply mask to activations (if mask exists for this layer)
