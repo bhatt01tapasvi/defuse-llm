@@ -15,15 +15,17 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
+DEVICE=2                  # CUDA device ID
+
 # Model configuration
-MODEL="meta-llama/Llama-3.1-8B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", etc.
+MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
 CACHE_DIR="llm_weights"
 
 # Prompt configuration
-PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="college_computer_science"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_TYPE="custom"           # Options: "custom", "mmlu"
+PROMPT_SUBJECT="college_computer_science_corpus"           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH=""               # Leave empty for None (no prompt length limit)
+PROMPT_LENGTH=2000               # Leave empty for None (no prompt length limit)
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
@@ -34,22 +36,27 @@ PROMPT_LENGTH=""               # Leave empty for None (no prompt length limit)
 ## Comment these out when pruning.
 LAYER_TOPK=""
 MASKING_STEP=""
-GENERATION=150
+GENERATION=0
+
+# Activation saving configuration
+SAVE_ACTIVATIONS=true       # Set to true to save activations (uses more memory)
 
 # Evaluation configuration - Perplexity
-EVAL_PERPLEXITY=true           # Set to true to enable perplexity evaluation
+EVAL_PERPLEXITY=false           # Set to true to enable perplexity evaluation
 PPL_DATASETS="mmlu"          # Options: "custom", "mmlu" (space-separated)
-PPL_SUBJECTS="college_computer_science"             # Subjects for perplexity evaluation (space-separated)
+PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"             # Subjects for perplexity evaluation (space-separated)
+#PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"             # Subjects for perplexity evaluation (space-separated)
                                # For custom: "imc", "food_corpus", "anne_corpus"
                                # For mmlu: "college_computer_science", "machine_learning", etc.
-PPL_MAX_SAMPLES=""             # Max samples for perplexity eval (leave empty for all)
+PPL_MAX_SAMPLES=200             # Max samples for perplexity eval (leave empty for all)
 
 # Evaluation configuration - MMLU
-EVAL_MMLU=false                # Set to true to enable MMLU evaluation
-MMLU_DATASETS="college_computer_science machine_learning electrical_engineering business_ethics world_religions prehistory moral_disputes"
+EVAL_MMLU=false             # Set to true to enable MMLU evaluation
+MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
+#MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"
                                # MMLU subjects to evaluate (space-separated)
-MMLU_SHOTS=0                   # Number of few-shot examples (0=zero-shot, 5=five-shot)
-MMLU_MAX_SAMPLES=""            # Max samples per MMLU task (leave empty for all)
+MMLU_SHOTS=2                   # Number of few-shot examples (0=zero-shot, 5=five-shot)
+MMLU_MAX_SAMPLES=200            # Max samples per MMLU task (leave empty for all)
 
 # Evaluation configuration - General NLP
 EVAL_GENERAL_NLP=false         # Set to true to enable general NLP evaluation
@@ -57,8 +64,8 @@ GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_ea
 GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-EXPERIMENT_NAME="prune_10to20_prompt_ccs_mmlu"
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/sanity"
+EXPERIMENT_NAME=${PROMPT_TYPE}_${PROMPT_SUBJECT}
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/activations"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
@@ -97,6 +104,7 @@ print_config() {
     echo "Layer TopK: $LAYER_TOPK"
     echo "Masking Step: $MASKING_STEP"
     echo "Generation Tokens: $GENERATION"
+    echo "Save Activations: $SAVE_ACTIVATIONS"
     echo ""
     echo "Evaluation Settings:"
     echo "  Perplexity: $EVAL_PERPLEXITY"
@@ -175,6 +183,7 @@ cat > "$CONFIG_LOG" << EOF
   "start_time": "$START_TIME",
   "model": "$MODEL",
   "cache_dir": "$CACHE_DIR",
+  "save_activations": $SAVE_ACTIVATIONS,
   "prompt": {
     "type": "$PROMPT_TYPE",
     "subject": "$PROMPT_SUBJECT",
@@ -214,7 +223,7 @@ echo "Configuration saved to: $CONFIG_LOG" | tee -a "$TIMING_LOG"
 # BUILD COMMAND
 # ============================================================================
 
-CMD="python dynamicPrune.py \
+CMD="CUDA_VISIBLE_DEVICES=$DEVICE python -u dynamicPrune.py \
     --model \"$MODEL\" \
     --cache_dir \"$CACHE_DIR\" \
     --prompt_type \"$PROMPT_TYPE\" \
@@ -224,6 +233,12 @@ CMD="python dynamicPrune.py \
 if [ -n "$PROMPT_LENGTH" ]; then
     CMD="$CMD \
     --prompt_length $PROMPT_LENGTH"
+fi
+
+# Add save_activations flag if enabled
+if [ "$SAVE_ACTIVATIONS" = true ]; then
+    CMD="$CMD \
+    --save_activations"
 fi
 
 # Add layer_topk only if set
@@ -334,7 +349,7 @@ TIMING_TOTAL=$(grep "TIMING_TOTAL=" "$OUTPUT_LOG" | tail -1 | cut -d'=' -f2)
     echo "EXPERIMENT COMPLETED"
     echo "========================================================================"
     echo "Finished at: $END_TIME"
-    echo "Duration: ${DURATION_MIN}m ${DURATION_SEC}s (${DURATION} seconds total)"
+    echo "Duration: ${DURATION_MIN}m ${DURATION_SEC}s" "($DURATION seconds total)"
     echo "Exit Status: $EXIT_STATUS"
     echo ""
     
@@ -368,26 +383,28 @@ TIMING_TOTAL=$(grep "TIMING_TOTAL=" "$OUTPUT_LOG" | tail -1 | cut -d'=' -f2)
         if [ -n "$TIMING_TOTAL" ] && [ "$(echo "$TIMING_TOTAL > 0" | bc -l 2>/dev/null)" = "1" ]; then
             echo "Time Distribution:"
             echo "------------------------------------------------------------------------"
-            python3 << EOF
+            # Use -c with proper escaping instead of heredoc
+            python3 -c "
+import sys
 try:
-    model_load = float("$TIMING_MODEL_LOAD")
-    prefill = float("$TIMING_PREFILL")
-    generation = float("$TIMING_GENERATION")
-    eval_ppl = float("$TIMING_EVAL_PPL")
-    eval_mmlu = float("$TIMING_EVAL_MMLU")
-    eval_general_nlp = float("$TIMING_EVAL_GENERAL_NLP")
-    total = float("$TIMING_TOTAL")
+    model_load = float('${TIMING_MODEL_LOAD}' if '${TIMING_MODEL_LOAD}' else '0')
+    prefill = float('${TIMING_PREFILL}' if '${TIMING_PREFILL}' else '0')
+    generation = float('${TIMING_GENERATION}' if '${TIMING_GENERATION}' else '0')
+    eval_ppl = float('${TIMING_EVAL_PPL}' if '${TIMING_EVAL_PPL}' else '0')
+    eval_mmlu = float('${TIMING_EVAL_MMLU}' if '${TIMING_EVAL_MMLU}' else '0')
+    eval_general_nlp = float('${TIMING_EVAL_GENERAL_NLP}' if '${TIMING_EVAL_GENERAL_NLP}' else '0')
+    total = float('${TIMING_TOTAL}' if '${TIMING_TOTAL}' else '0')
     
     if total > 0:
-        print(f"  Model load:        {model_load:10.2f}s  ({model_load/total*100:5.1f}%)")
-        print(f"  Prefill:           {prefill:10.2f}s  ({prefill/total*100:5.1f}%)")
-        print(f"  Generation:        {generation:10.2f}s  ({generation/total*100:5.1f}%)")
-        print(f"  Eval (Perplexity): {eval_ppl:10.2f}s  ({eval_ppl/total*100:5.1f}%)")
-        print(f"  Eval (MMLU):       {eval_mmlu:10.2f}s  ({eval_mmlu/total*100:5.1f}%)")
-        print(f"  Eval (General):    {eval_general_nlp:10.2f}s  ({eval_general_nlp/total*100:5.1f}%)")
-except:
-    pass
-EOF
+        print(f'  Model load:        {model_load:10.2f}s  ({model_load/total*100:5.1f}%)')
+        print(f'  Prefill:           {prefill:10.2f}s  ({prefill/total*100:5.1f}%)')
+        print(f'  Generation:        {generation:10.2f}s  ({generation/total*100:5.1f}%)')
+        print(f'  Eval (Perplexity): {eval_ppl:10.2f}s  ({eval_ppl/total*100:5.1f}%)')
+        print(f'  Eval (MMLU):       {eval_mmlu:10.2f}s  ({eval_mmlu/total*100:5.1f}%)')
+        print(f'  Eval (General):    {eval_general_nlp:10.2f}s  ({eval_general_nlp/total*100:5.1f}%)')
+except Exception as e:
+    print(f'Error calculating percentages: {e}', file=sys.stderr)
+" 2>/dev/null
             echo ""
         fi
     fi

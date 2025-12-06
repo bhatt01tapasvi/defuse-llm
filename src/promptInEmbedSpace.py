@@ -13,10 +13,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 DOMAIN_CONSISTENCY_DIR = os.path.join(RESULTS_DIR, "domain_consistency")
+MLP_IMPACT_DIR = os.path.join(RESULTS_DIR, "mlp_impact")
 
 # Ensure directories exist
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(DOMAIN_CONSISTENCY_DIR, exist_ok=True)
+os.makedirs(MLP_IMPACT_DIR, exist_ok=True)
 
 global_means = {}
 
@@ -302,6 +304,162 @@ def analyze_representation_structure(data, name, layer='block_11'):
         'last_token': last_token
     }
 
+def analyze_mlp_residual_impact(pre_mlp_acts: Dict[str, list], post_mlp_acts: Dict[str, list]):
+    """
+    Compare residual stream before MLP vs after adding MLP output
+    
+    Residual connection: residual_after = residual_before + MLP(residual_before)
+    
+    Where:
+    - residual_before = pre_mlp_acts (input to MLP, also passed through residual)
+    - MLP_output = post_mlp_acts (what MLP computed)
+    - residual_after = pre_mlp_acts + post_mlp_acts (final residual after adding MLP)
+    
+    We compare residual_before vs residual_after to see MLP's impact
+    """
+    
+    results = []
+    
+    for layer_name in pre_mlp_acts.keys():
+        # Single prefill pass - take the last (and only) forward pass
+        residual_before = pre_mlp_acts[layer_name][-1]  # Shape: (num_tokens, embed_dim)
+        mlp_output = post_mlp_acts[layer_name][-1]  # Shape: (num_tokens, embed_dim)
+        
+        # Construct the residual stream after adding MLP output
+        residual_after = residual_before + mlp_output
+        
+        num_tokens = residual_before.shape[0]
+        
+        # Token-wise analysis
+        token_similarities = []
+        token_distances = []
+        token_relative_changes = []
+        token_mlp_norms = []
+        token_before_norms = []
+        token_after_norms = []
+        
+        for token_idx in range(num_tokens):
+            before = residual_before[token_idx]
+            after = residual_after[token_idx]
+            mlp_delta = mlp_output[token_idx]
+            
+            # Metrics
+            cos_sim = cosine_similarity(before, after)
+            eucl_dist = euclidean_distance(before, after)
+            
+            before_norm = np.linalg.norm(before)
+            after_norm = np.linalg.norm(after)
+            mlp_norm = np.linalg.norm(mlp_delta)
+            
+            relative_change = mlp_norm / (before_norm + 1e-8)
+            
+            token_similarities.append(cos_sim)
+            token_distances.append(eucl_dist)
+            token_relative_changes.append(relative_change)
+            token_mlp_norms.append(mlp_norm)
+            token_before_norms.append(before_norm)
+            token_after_norms.append(after_norm)
+        
+        # Aggregate for this layer
+        layer_result = {
+            'layer': layer_name,
+            'avg_cosine_sim': np.mean(token_similarities),
+            'min_cosine_sim': np.min(token_similarities),
+            'max_cosine_sim': np.max(token_similarities),
+            'avg_euclidean': np.mean(token_distances),
+            'avg_relative_change': np.mean(token_relative_changes),
+            'max_relative_change': np.max(token_relative_changes),
+            'avg_mlp_norm': np.mean(token_mlp_norms),
+            'avg_before_norm': np.mean(token_before_norms),
+            'avg_after_norm': np.mean(token_after_norms),
+        }
+        
+        results.append(layer_result)
+    
+    return results
+
+def create_comparison_table_mlp(results: list, path_to_save: str, dataset_name: str):
+    """Create a formatted table for MLP impact results"""
+    
+    # Extract layer names and sort them numerically
+    def extract_block_number(layer_name):
+        if 'block_' in layer_name:
+            return int(layer_name.split('_')[1])
+        return 0
+    
+    # Sort results by block number
+    sorted_results = sorted(results, key=lambda x: extract_block_number(x['layer']))
+    
+    # Create DataFrame
+    df = pd.DataFrame(sorted_results)
+    
+    # Print formatted table
+    print(f"\n{dataset_name} - MLP Residual Impact Analysis")
+    print("=" * 100)
+    print("Comparing: Residual_Before vs Residual_After = Residual_Before + MLP_Output")
+    print("=" * 100)
+    print(df.to_string(index=False, justify='center'))
+    print("\n")
+    
+    # Save to CSV
+    df.to_csv(path_to_save, index=False)
+    print(f"Table saved to: {path_to_save}\n")
+    
+    return df
+
+def compareMLPImpact(datasets: list[Tuple[str, Any]]):
+    """
+    Analyze MLP impact for multiple datasets
+    """
+    
+    print("\n" + "="*80)
+    print("MLP RESIDUAL STREAM IMPACT ANALYSIS")
+    print("Comparing: Residual_Before vs Residual_After = Residual_Before + MLP_Output")
+    print("="*80)
+    
+    all_results = {}
+    
+    for dataset_name, data in datasets:
+    #     # Check if the residual connection math is consistent
+    #     # Compare layer by layer, token by token
+    #     is_consistent = True
+        
+    #     for layer_name in data['pre_ln2_activations'].keys():
+    #         print(len(data['pre_ln2_activations'][layer_name]),len(data['pre_ln2_activations'][layer_name][0][0]))
+    #         pre_ln2 = data['pre_ln2_activations'][layer_name][-1]  # (num_tokens, embed_dim)
+    #         post_mlp2 = data['post_mlp2_activations'][layer_name][-1]  # (num_tokens, embed_dim)
+    #         post_layer = data['post_layer_activations'][layer_name][-1]  # (num_tokens, embed_dim)
+            
+    #         # Check if: post_layer = pre_ln2 + post_mlp2
+    #         expected = pre_ln2 + post_mlp2
+            
+    #         if not np.allclose(expected, post_layer, rtol=1e-5, atol=1e-6):
+    #             print(f"⚠️  Data inconsistency in dataset: {dataset_name}, layer: {layer_name}")
+    #             print(f"    Expected shape: {expected.shape}, Got: {post_layer.shape}")
+    #             print(f"    Max difference: {np.max(np.abs(expected - post_layer)):.6f}")
+    #             is_consistent = False
+    #             break
+        
+    #     if not is_consistent:
+    #         print(f"❌ Skipping analysis for {dataset_name} due to inconsistency.\n")
+    #         continue
+        
+    #    print(f"✓ Data consistency verified for {dataset_name}")
+        
+        # Analyze this dataset
+        results = analyze_mlp_residual_impact(
+            data['pre_ln2_activations'],  # Residual before MLP
+            data['post_mlp2_activations']  # MLP output (to be added to residual)
+        )
+        
+        # Save results
+        save_path = os.path.join(MLP_IMPACT_DIR, f"{dataset_name}_mlp_impact.csv")
+        df = create_comparison_table_mlp(results, save_path, dataset_name)
+        
+        all_results[dataset_name] = df
+    
+    return all_results
+
 def structure_explainer(data: dict[str, Any]=None):
     if data is None:
         print("No data available for structure explanation.")
@@ -328,107 +486,116 @@ def structure_explainer(data: dict[str, Any]=None):
         print(f"  Sample layer names: {layer_names}{'...' if len(activation_dict) > 3 else ''}")
 
 def main():
-    activation_imc = "results/prompts/long/imc/activations.pkl"
-    data_imc = data_loader(activation_imc)
+    # activation_imc = "results/prompts/long/imc/activations.pkl"
+    # data_imc = data_loader(activation_imc)
 
-    activation_astro = "results/prompts/long/astro/activations.pkl"
-    data_astro = data_loader(activation_astro)
+    # activation_astro = "results/prompts/long/astro/activations.pkl"
+    # data_astro = data_loader(activation_astro)
 
-    activation_imc2 = "results/prompts/long/imc2/activations.pkl"
-    data_imc2 = data_loader(activation_imc2)
+    # activation_imc2 = "results/prompts/long/imc2/activations.pkl"
+    # data_imc2 = data_loader(activation_imc2)
 
-    activation_imc3 = "results/prompts/long/imc3/activations.pkl"
-    data_imc3 = data_loader(activation_imc3)
+    # activation_imc3 = "results/prompts/long/imc3/activations.pkl"
+    # data_imc3 = data_loader(activation_imc3)
 
-    activation_pizzas = "results/prompts/long/pizzas/activations.pkl"
-    data_pizzas = data_loader(activation_pizzas)
+    # activation_pizzas = "results/prompts/long/pizzas/activations.pkl"
+    # data_pizzas = data_loader(activation_pizzas)
 
-    activation_actress = "results/prompts/long/actress/activations.pkl"
-    data_actress = data_loader(activation_actress)
+    # activation_actress = "results/prompts/long/actress/activations.pkl"
+    # data_actress = data_loader(activation_actress)
 
-    activation_hindi = "results/prompts/long/hindi/activations.pkl"
-    data_hindi = data_loader(activation_hindi)
+    # activation_hindi = "results/prompts/long/hindi/activations.pkl"
+    # data_hindi = data_loader(activation_hindi)
 
-    activation_maths = "results/prompts/long/maths/activations.pkl"
-    data_maths = data_loader(activation_maths)
+    # activation_maths = "results/prompts/long/maths/activations.pkl"
+    # data_maths = data_loader(activation_maths)
 
-    activation_imc_word = "results/prompts/short/imc_word/activations.pkl"
-    data_imc_word = data_loader(activation_imc_word)
+    # activation_imc_word = "results/prompts/short/imc_word/activations.pkl"
+    # data_imc_word = data_loader(activation_imc_word)
 
-    activation_imc2_word = "results/prompts/short/imc2_word/activations.pkl"
-    data_imc2_word = data_loader(activation_imc2_word)
+    # activation_imc2_word = "results/prompts/short/imc2_word/activations.pkl"
+    # data_imc2_word = data_loader(activation_imc2_word)
 
-    activation_pizzas_word = "results/prompts/short/pizzas_word/activations.pkl"
-    data_pizzas_word = data_loader(activation_pizzas_word)
+    # activation_pizzas_word = "results/prompts/short/pizzas_word/activations.pkl"
+    # data_pizzas_word = data_loader(activation_pizzas_word)
 
-    activation_actress_word = "results/prompts/short/actress_word/activations.pkl"
-    data_actress_word = data_loader(activation_actress_word)
+    # activation_actress_word = "results/prompts/short/actress_word/activations.pkl"
+    # data_actress_word = data_loader(activation_actress_word)
 
-    activation_astro_word = "results/prompts/short/astro_word/activations.pkl"
-    data_astro_word = data_loader(activation_astro_word)
+    # activation_astro_word = "results/prompts/short/astro_word/activations.pkl"
+    # data_astro_word = data_loader(activation_astro_word)
 
-    activation_imc2_para = "results/prompts/para/imc2/activations.pkl"
-    data_imc2_para = data_loader(activation_imc2_para)
+    # activation_imc2_para = "results/prompts/para/imc2/activations.pkl"
+    # data_imc2_para = data_loader(activation_imc2_para)
 
-    activation_imc_para = "results/prompts/para/imc/activations.pkl"
-    data_imc_para = data_loader(activation_imc_para)
+    # activation_imc_para = "results/prompts/para/imc/activations.pkl"
+    # data_imc_para = data_loader(activation_imc_para)
     
-    activation_pizzas_para = "results/prompts/para/pizzas/activations.pkl"
-    data_pizzas_para = data_loader(activation_pizzas_para)
+    # activation_pizzas_para = "results/prompts/para/pizzas/activations.pkl"
+    # data_pizzas_para = data_loader(activation_pizzas_para)
 
-    activation_actress_para = "results/prompts/para/actress/activations.pkl"
-    data_actress_para = data_loader(activation_actress_para)
+    # activation_actress_para = "results/prompts/para/actress/activations.pkl"
+    # data_actress_para = data_loader(activation_actress_para)
 
-    activation_gpt_ask1 = "results/prompts/gpt/ask1/activations.pkl"
-    data_gpt_ask1 = data_loader(activation_gpt_ask1)
+    # activation_gpt_ask1 = "results/prompts/gpt/ask1/activations.pkl"
+    # data_gpt_ask1 = data_loader(activation_gpt_ask1)
 
-    activation_gpt_reply1 = "results/prompts/gpt/reply1/activations.pkl"
-    data_gpt_reply1 = data_loader(activation_gpt_reply1)
+    # activation_gpt_reply1 = "results/prompts/gpt/reply1/activations.pkl"
+    # data_gpt_reply1 = data_loader(activation_gpt_reply1)
 
-    all_datasets = [
-        ("IMC", data_imc), ("Astro", data_astro), ("IMC2", data_imc2), ("IMC3", data_imc3),
-        ("Pizzas", data_pizzas), ("Actress", data_actress), ("Hindi", data_hindi), ("Maths", data_maths),
-        ("IMC_word", data_imc_word), ("IMC2_word", data_imc2_word), ("Pizzas_word", data_pizzas_word),
-        ("Actress_word", data_actress_word), ("Astro_word", data_astro_word),
-        ("IMC2_para", data_imc2_para), ("IMC_para", data_imc_para), 
-        ("Pizzas_para", data_pizzas_para), ("Actress_para", data_actress_para),
-        ("GPT_ask1", data_gpt_ask1), ("GPT_reply1", data_gpt_reply1)
-    ]
+    # all_datasets = [
+    #     ("IMC", data_imc), ("Astro", data_astro), ("IMC2", data_imc2), ("IMC3", data_imc3),
+    #     ("Pizzas", data_pizzas), ("Actress", data_actress), ("Hindi", data_hindi), ("Maths", data_maths),
+    #     ("IMC_word", data_imc_word), ("IMC2_word", data_imc2_word), ("Pizzas_word", data_pizzas_word),
+    #     ("Actress_word", data_actress_word), ("Astro_word", data_astro_word),
+    #     ("IMC2_para", data_imc2_para), ("IMC_para", data_imc_para), 
+    #     ("Pizzas_para", data_pizzas_para), ("Actress_para", data_actress_para),
+    #     ("GPT_ask1", data_gpt_ask1), ("GPT_reply1", data_gpt_reply1)
+    # ]
 
-    normal_datasets = [
-        ("IMC", data_imc), ("Astro", data_astro), ("IMC2", data_imc2), ("IMC3", data_imc3),
-        ("Pizzas", data_pizzas), ("Actress", data_actress), ("Hindi", data_hindi), ("Maths", data_maths)
-    ]
+    # normal_datasets = [
+    #     ("IMC", data_imc), ("Astro", data_astro), ("IMC2", data_imc2), ("IMC3", data_imc3),
+    #     ("Pizzas", data_pizzas), ("Actress", data_actress), ("Hindi", data_hindi), ("Maths", data_maths)
+    # ]
 
-    word_datasets = [
-        ("IMC_word", data_imc_word), ("IMC2_word", data_imc2_word), ("Pizzas_word", data_pizzas_word),
-        ("Actress_word", data_actress_word), ("Astro_word", data_astro_word)
-    ]
+    # word_datasets = [
+    #     ("IMC_word", data_imc_word), ("IMC2_word", data_imc2_word), ("Pizzas_word", data_pizzas_word),
+    #     ("Actress_word", data_actress_word), ("Astro_word", data_astro_word)
+    # ]
 
-    para_datasets = [
-        ("IMC2_para", data_imc2_para), ("IMC_para", data_imc_para),
-        ("Pizzas_para", data_pizzas_para), ("Actress_para", data_actress_para)
-    ]
+    # para_datasets = [
+    #     ("IMC2_para", data_imc2_para), ("IMC_para", data_imc_para),
+    #     ("Pizzas_para", data_pizzas_para), ("Actress_para", data_actress_para)
+    # ]
 
-    compute_global_means(all_datasets, embed="pre_ln2_activations")
-    print(f"\nGlobal means computed for {len(global_means)} layers")
+    #compute_global_means(all_datasets, embed="pre_ln2_activations")
+    #print(f"\nGlobal means computed for {len(global_means)} layers")
 
     # Quick overview of the structure of the datasets
     #structure_explainer(data_imc)
 
-    print("\n" + "="*80)
-    print("EMBEDDING SPACE COMPARISONS")
-    print("="*80)
+    # print("\n" + "="*80)
+    # print("EMBEDDING SPACE COMPARISONS")
+    # print("="*80)
 
     #compareInEmbedSpaceSummary(datasets=normal_datasets, embed = "pre_ln1_activations")
 
-    compareDomainConsistency(data_gpt_ask1, data_gpt_reply1, embed="pre_ln2_activations")
+    #compareDomainConsistency(data_gpt_ask1, data_gpt_reply1, embed="pre_ln2_activations")
 
     # Run for both
     # result_imc = analyze_representation_structure(data_imc_word, "In-memory computing")
     # result_pizza = analyze_representation_structure(data_pizzas_word, "Neapolitan pizza")
     # result_imc2 = analyze_representation_structure(data_imc2_word, "In-memory computing 2")
     # result_actress = analyze_representation_structure(data_actress_word, "Actress")
+
+    activation_abstract_algebra = "/users/grad/abhishektyagi/wanda/wanda/results/activations/meta-llama_Llama-3.2-3B/custom_abstract_algebra_corpus/activations.pkl"
+    data_abstract_algebra = data_loader(activation_abstract_algebra)
+
+    new_datasets = [
+        ("abstract_algebra", data_abstract_algebra)
+    ]
+
+    compareMLPImpact(datasets=new_datasets)
 
 if __name__ == '__main__':
     main()

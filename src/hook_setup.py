@@ -1,10 +1,11 @@
 import torch
 import numpy as np
+import gc
 
 def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activations, 
                      post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
                      pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-                     mlp2_forward_proxy, embedding_weights):
+                     mlp2_forward_proxy, embedding_weights, save_activations=False):
     """Setup hooks for GPT2 architecture."""
     hooks = []
     
@@ -19,6 +20,9 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
             else:
                 activation_tensor = outp
             
+            if not save_activations:
+                return
+
             # TODO: Fix this .mean operation because we are sending just one batch, it's used for crushing the batch dimension.
             # the promptInEmbedSpace.py function uses the 2d activation_magnitude tensor so it has to be edited to accomodate 3d tensors.
             
@@ -44,16 +48,20 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
                 inp_tensor = inp
                 inp_rest = ()
 
-            activation_magnitude = inp_tensor
-            
+            # For mlp2, we MUST defuse neurons (this is critical path)
             if "mlp2" in sublayer_name:
-                pre_mlp2_activations[layer_name].append(inp_tensor.detach().cpu().numpy())
+                if save_activations:
+                    pre_mlp2_activations[layer_name].append(inp_tensor.detach().cpu().numpy())
                 modified_tensor = neuronDefuser.defuse_neurons(layer_name, inp_tensor)
                 return (modified_tensor,) + inp_rest
             
+            # Only save other activations if flag is enabled
+            if not save_activations:
+                return
             # TODO: Fix this .mean operation because we are sending just one batch, it's used for crushing the batch dimension.
             # the promptInEmbedSpace.py function uses the 2d activation_magnitude tensor so it has to be edited to accomodate 3d tensors.
             
+            activation_magnitude = inp_tensor
             if len(inp_tensor.shape) == 3:
                 activation_magnitude = inp_tensor.mean(dim=0)
             else:
@@ -91,24 +99,31 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
             hooks.extend([hook_proj, hook_proj_post])
 
         weight = block.mlp.c_proj.weight.data
-        mlp2_forward_proxy[f'layer_{i}'] = (weight @ embedding_weights.T).detach().cpu().numpy()
+        if save_activations:
+            mlp2_forward_proxy[f'layer_{i}'] = (weight @ embedding_weights.T).detach().cpu().numpy()
         neuronDefuser.populate_forward_proxy(f'layer_{i}', weight, embedding_weights)
+        
+        del weight
+        torch.cuda.empty_cache()
 
         hook_layer_post = block.register_forward_hook(create_hook_post(f"layer_{i}", "layer"))
         hooks.append(hook_layer_post)
     
+    gc.collect()
     return hooks
 
 def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activations, 
                       post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
                       pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-                      mlp2_forward_proxy, embedding_weights):
+                      mlp2_forward_proxy, embedding_weights, save_activations=False):
     """Setup hooks for LLaMA architecture."""
     hooks = []
     
     def create_hook_post(layer_name, sublayer_name):
         def hook_fn(module, inp, outp):
-            # Handle different output types
+            if not save_activations:
+                return
+                
             if isinstance(outp, tuple):
                 activation_tensor = outp[0]
             elif isinstance(outp, torch.Tensor):
@@ -134,7 +149,6 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
         return hook_fn
     
     def create_hook_pre_with_kwargs(layer_name, sublayer_name):
-        """Hook that handles both positional args and keyword args."""
         def hook_fn(module, args, kwargs):
             # Extract hidden_states from either args or kwargs
             if args and len(args) > 0:
@@ -147,18 +161,16 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 # No hidden_states found, skip
                 return
             
-            # Skip if inp_tensor is None
             if inp_tensor is None:
                 return
 
-            activation_magnitude = inp_tensor
-            
-            # For LLaMA, the down_proj is where we want to defuse neurons
+            # For mlp_down, we MUST defuse neurons (critical path)
             if "mlp_down" in sublayer_name:
-                pre_mlp2_activations[layer_name].append(inp_tensor.detach().cpu().numpy())
+                if save_activations:
+                    pre_mlp2_activations[layer_name].append(inp_tensor.detach().cpu().numpy())
+                    
                 modified_tensor = neuronDefuser.defuse_neurons(layer_name, inp_tensor)
                 
-                # Return modified args/kwargs
                 if args and len(args) > 0:
                     return ((modified_tensor,) + args_rest, kwargs)
                 else:
@@ -167,6 +179,11 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
             
             # TODO: Fix this .mean operation because we are sending just one batch, it's used for crushing the batch dimension.
             # the promptInEmbedSpace.py function uses the 2d activation_magnitude tensor so it has to be edited to accomodate 3d tensors.
+            
+            if not save_activations:
+                return
+                
+            activation_magnitude = inp_tensor
             if len(inp_tensor.shape) == 3:
                 activation_magnitude = inp_tensor.mean(dim=0)
             else:
@@ -233,11 +250,15 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
         weight = layer.mlp.down_proj.weight.data  # (hidden_size, intermediate_size)
         # embedding_weights: (vocab_size, hidden_size)
         # Transpose weight to get (intermediate_size, hidden_size), then multiply
-        mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()  # (intermediate_size, vocab_size)
+        if save_activations:
+            mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()  # (intermediate_size, vocab_size)
         neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights)
+        
+        del weight
+        torch.cuda.empty_cache()
 
-        # Hook for the entire decoder layer output
         hook_layer_post = layer.register_forward_hook(create_hook_post(f"layer_{i}", "layer"))
         hooks.append(hook_layer_post)
     
+    gc.collect()
     return hooks

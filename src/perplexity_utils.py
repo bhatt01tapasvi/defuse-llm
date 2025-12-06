@@ -17,11 +17,11 @@ def load_corpus(dataset_path: str, text_column: str = "text", max_samples: int =
         except Exception as e:
             print(f"Failed to load as HF dataset: {e}")
     
-    # # Try loading as text file
-    # elif dataset_path.endswith('.txt'):
-    #     with open(dataset_path, 'r', encoding='utf-8') as f:
-    #         content = f.read()
-    #         texts = [p.strip() for p in content.split('\n\n') if p.strip()]
+    # Try loading as text file
+    elif dataset_path.endswith('.txt'):
+        with open(dataset_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            texts = [p.strip() for p in content.split('\n\n') if p.strip()]
     
     # Try loading from datasets directory by name
     else:
@@ -44,7 +44,7 @@ def calculate_perplexity(model, tokenizer, texts: list[str], max_length: int = 5
             continue
         
         encodings = tokenizer(text, return_tensors="pt", truncation=False, add_special_tokens=True)
-        input_ids = encodings.input_ids[0]
+        input_ids = encodings.input_ids[0].to(device)
         seq_len = input_ids.size(0)
         
         if seq_len < 2:
@@ -96,7 +96,7 @@ def calculate_perplexity_builtin(model, tokenizer, texts: list[str], max_length:
         
         # Tokenize without truncation
         encodings = tokenizer(text, return_tensors="pt", truncation=False, add_special_tokens=True)
-        input_ids = encodings.input_ids[0]
+        input_ids = encodings.input_ids[0].to(device)
         seq_len = input_ids.size(0)
         
         if seq_len < 2:

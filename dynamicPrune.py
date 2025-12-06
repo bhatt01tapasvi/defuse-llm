@@ -12,11 +12,14 @@ import matplotlib.pyplot as plt
 from datasets import config
 import time
 
+from src.dataset_creation import EXISTING_CUSTOM_DATASETS
 from src.neuronDefuser import NeuronDefuser
-from src.perplexity_utils import evaluate_on_datasets
-from src.mmlu_utils import get_mmlu_prompt_concat
+from src.perplexity_utils import load_corpus, evaluate_on_datasets
+from src.mmlu_utils import get_mmlu_prompt_concat, MMLU_SUBJECTS
 from src.general_nlp_utils import evaluate_general_nlp
 from src.hook_setup import setup_hooks_gpt2, setup_hooks_llama
+
+from src.memoryProfiler import MemoryProfiler, print_gpu_memory_summary, find_large_tensors
 
 try:
     from lm_eval import simple_evaluate
@@ -200,10 +203,18 @@ def initialize_prompt(tokenizer, device, max_seq_len: int, prompt_type="custom",
         prompt_text = get_mmlu_prompt_concat(prompt_subject)   # We don't pass max_samples because that picks the Question, Choices and Answer sets together.
     elif prompt_type == "custom":
         if prompt_subject is not None:
-            if prompt_subject not in custom_prompts:
-                available = ", ".join(custom_prompts.keys())
-                raise ValueError(f"Unknown prompt_subjects '{prompt_subject}'. Available options: {available}")
-            prompt_text = custom_prompts[prompt_subject]
+            if 'corpus' in prompt_subject:
+                # Load from corpus file
+                corpus_path = os.path.join(DATASETS_DIR, prompt_subject, f"{prompt_subject}_corpus.txt")
+                if not os.path.isfile(corpus_path):
+                    raise ValueError(f"Corpus file not found for prompt_subject '{prompt_subject}' at path: {corpus_path}")
+                with open(corpus_path, 'r', encoding='utf-8') as f:
+                    prompt_text = f.read().strip()
+            else:
+                if prompt_subject not in custom_prompts:
+                    available = ", ".join(custom_prompts.keys())
+                    raise ValueError(f"Unknown prompt_subjects '{prompt_subject}'. Available options: {available}")
+                prompt_text = custom_prompts[prompt_subject]
         elif custom_text is not None:
             prompt_text = custom_text
         else:
@@ -295,6 +306,9 @@ def main():
     parser.add_argument('--general_nlp_max_samples', type=int, default=None, help='Max samples for general nlp eval')
     args = parser.parse_args()
 
+    profiler = MemoryProfiler(device='cuda:0')  # Use default, will update later if needed
+    profiler.snapshot("startup")
+
     # Set random seeds
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -313,10 +327,13 @@ def main():
 
     print(f"Loading model: {args.model}")
     times['start'] = time.time()
+    
+    profiler.start("model_loading")
     model = get_llm(args.model, args.cache_dir)
     times['model_load'] = time.time() - times['start']
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
+    profiler.end("model_loading")
 
     # Detect model type
     model_type = detect_model_type(model)
@@ -372,22 +389,25 @@ def main():
     )
     
     # Setup hooks based on model type
+    profiler.start("hook_setup")
     if model_type == 'gpt2':
         hooks = setup_hooks_gpt2(
             model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
             post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-            mlp2_forward_proxy, embedding_weights
+            mlp2_forward_proxy, embedding_weights, save_activations=args.save_activations
         )
-    else:  # llama
+    elif model_type == 'llama':
         hooks = setup_hooks_llama(
             model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
             post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-            mlp2_forward_proxy, embedding_weights
+            mlp2_forward_proxy, embedding_weights, save_activations=args.save_activations
         )
+    profiler.end("hook_setup")
 
     # Tokenize and run prompt
+    profiler.start("prompt_init")
     prompt_text, input_ids = initialize_prompt(
         tokenizer=tokenizer,
         device=device,
@@ -397,21 +417,25 @@ def main():
         prompt_subject=args.prompt_subject,
         custom_text=args.custom_prompt_text
     )
+    profiler.end("prompt_init")
 
     # Store initial token count for later
     initial_token_count = input_ids.shape[1]
 
     # Prefill Phase
+    profiler.start("prefill_phase")
     start = time.time()
     with torch.no_grad():
         outputs = model(input_ids, use_cache=True)
     times['prefill'] = time.time() - start
+    profiler.end("prefill_phase")
 
     # Decode / Generation Phase
     start = time.time()
     past_key_values = outputs.past_key_values
     all_tokens = input_ids
     
+    profiler.start("generation_phase")
     for i in range(args.generation):
         iter_start = time.time()
         with torch.no_grad():
@@ -428,6 +452,7 @@ def main():
         if i % 10 == 0:
             print(f"Token {i}: {time.time() - iter_start:.3f}s")
     
+    profiler.end("generation_phase")
     times['generation'] = time.time() - start
 
     if args.save_activations:
@@ -448,16 +473,21 @@ def main():
                 'model_type': model_type
             }, f)
         print(f"Activations saved to {save_path}")
+    
 
     # Perf analysis
     if args.eval_perplexity:
+        profiler.start("eval_perplexity")
         start_time = time.time()
         evaluate_perplexity(model, tokenizer, device, args.ppl_datasets, args.ppl_subjects, max_samples=args.ppl_max_samples, save_dir=args.save_res_dir)
         times['eval_ppl'] = time.time() - start_time
+        profiler.end("eval_perplexity")
     if args.eval_mmlu:
+        profiler.start("eval_mmlu")
         start_time = time.time()
         evaluate_mmlu_multi_shot(model, tokenizer, device, args.mmlu_datasets, max_samples=args.mmlu_max_samples, shots=args.mmlu_shots, save_dir=args.save_res_dir)
         times['eval_mmlu'] = time.time() - start_time
+        profiler.end("eval_mmlu")
     if args.eval_general_nlp:
         start_time = time.time()
         evaluate_general_datasets(model, tokenizer, device, max_samples=args.general_nlp_max_samples, datasets=args.general_nlp_datasets, save_dir=args.save_res_dir)
@@ -467,6 +497,13 @@ def main():
     for hook in hooks:
         hook.remove()
 
+    profiler.print_report()
+    print("\n" + "="*80)
+    print("CHECKING FOR LARGE TENSORS IN MEMORY")
+    print("="*80)
+    large_tensors = find_large_tensors(threshold_mb=50)
+
+    print_gpu_memory_summary()
     times['end'] = time.time()
     # Printing the input and output statements.
     print("\n" + "="*80)
@@ -519,19 +556,23 @@ def evaluate_perplexity(model, tokenizer, device, perplexity_datasets, perplexit
     for dataset in perplexity_datasets:
         if dataset == "custom":
             for subject in perplexity_subjects:
-                if subject == "in_memory_computing" or subject == "imc":
-                    datasets_to_eval.append((dataset, subject, os.path.join(DATASETS_DIR, "in_memory_computing", "in_memory_computing_dataset")))
-                elif subject == "food_corpus":
-                    datasets_to_eval.append((dataset, subject, os.path.join(DATASETS_DIR, "food_corpus", "food_corpus_dataset")))
-                elif subject == "anne_corpus":
-                    datasets_to_eval.append((dataset, subject, os.path.join(DATASETS_DIR, "anne_corpus", "anne_corpus_dataset")))
+                if subject not in EXISTING_CUSTOM_DATASETS:
+                    print(f"Warning: Unknown subject '{subject}' for custom dataset, skipping...")
+                    continue
+                else:
+                    datasets_to_eval.append((dataset, subject, os.path.join(DATASETS_DIR, subject, f"{subject}_dataset")))
+
         elif dataset == "mmlu":
             # Extract the actual subject name (e.g., "mmlu_college_computer_science" -> "college_computer_science")
             for subject in perplexity_subjects:      
-                datasets_to_eval.append((dataset, subject, ""))
-                print(f"Added MMLU dataset: {subject}")
+                if subject not in MMLU_SUBJECTS:
+                    print(f"Warning: Unknown subject '{subject}' for MMLU dataset, skipping...")
+                    continue
+                else:
+                    datasets_to_eval.append((dataset, subject, ""))
+                    print(f"Added MMLU dataset: {subject}")
         else:
-            print(f"Warning: Unknown subject '{subject}', skipping...")
+            print(f"Warning: Unknown dataset '{dataset}', skipping...")
     
     if not datasets_to_eval:
         print("No valid datasets to evaluate!")

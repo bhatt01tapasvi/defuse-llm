@@ -8,7 +8,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 MMLU_DATASETS_DIR = os.path.join(PROJECT_ROOT, "datasets", "mmlu")
 os.makedirs(MMLU_DATASETS_DIR, exist_ok=True)
 
-SUBJECTS = [
+MMLU_SUBJECTS = [
     "abstract_algebra", "anatomy", "astronomy", "business_ethics", "clinical_knowledge",
     "college_biology", "college_chemistry", "college_computer_science", "college_mathematics",
     "college_medicine", "college_physics", "computer_security", "conceptual_physics",

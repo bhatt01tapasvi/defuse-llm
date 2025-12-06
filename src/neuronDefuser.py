@@ -82,10 +82,17 @@ class NeuronDefuser:
     def populate_forward_proxy(self, layer_name: str, weight: torch.Tensor, embedding_weights: torch.Tensor):
         self._register_layer(layer_name)
 
+        # Ensure tensors are on correct device
+        weight = weight.to(self.device)
+        embedding_weights = embedding_weights.to(self.device)
+
         # Calculate forward proxy and keep it on GPU
         forward_proxy = (weight @ embedding_weights.T).detach()  # Remove .cpu().numpy()
         self.forward_proxies_max[layer_name] = torch.max(torch.abs(forward_proxy), dim=1)[0]
         self.forward_proxies_mean[layer_name] = torch.mean(torch.abs(forward_proxy), dim=1)
+        
+        del forward_proxy
+        torch.cuda.empty_cache()
 
     def _normalize_scores(self, scores: torch.Tensor) -> torch.Tensor:
         min_val = scores.min()
