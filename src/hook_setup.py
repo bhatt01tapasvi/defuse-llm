@@ -115,7 +115,7 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
 def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activations, 
                       post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
                       pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-                      mlp2_forward_proxy, embedding_weights, save_activations=False):
+                      mlp2_forward_proxy, embedding_weights, mlp2_weights, save_activations=False):
     """Setup hooks for LLaMA architecture."""
     hooks = []
     
@@ -251,6 +251,8 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
         # embedding_weights: (vocab_size, hidden_size)
         # Transpose weight to get (intermediate_size, hidden_size), then multiply
         if save_activations:
+            #mlp1_weights[f'layer_{i}'] = layer.mlp.gate_proj.weight.data.detach().cpu().numpy()
+            mlp2_weights[f'layer_{i}'] = weight.detach().cpu().numpy()
             mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()  # (intermediate_size, vocab_size)
         neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights)
         

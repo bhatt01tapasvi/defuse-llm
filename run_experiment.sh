@@ -15,7 +15,7 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
-DEVICE=2                  # CUDA device ID
+DEVICE=0                  # CUDA device ID
 
 # Model configuration
 MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
@@ -23,7 +23,7 @@ CACHE_DIR="llm_weights"
 
 # Prompt configuration
 PROMPT_TYPE="custom"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="college_computer_science_corpus"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_SUBJECT="imc_key"           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
 PROMPT_LENGTH=2000               # Leave empty for None (no prompt length limit)
 

@@ -161,39 +161,98 @@ def initialize_prompt(tokenizer, device, max_seq_len: int, prompt_type="custom",
     # Define all available custom_prompts
     custom_prompts = {
         # In-Memory Computing prompts
-        "imc": "In-memory computing enables parallel processing by performing arithmetic operations directly within memory arrays, eliminating the need for data movement between processor and memory in the system.",
+        "imc_key": "In-memory computing",
+
+        "imc_synonym_key": "Processing in memory",
+
+        "imc_definition": "In-memory computing enables parallel processing by performing arithmetic operations directly within memory arrays, eliminating the need for data movement between processor and memory in the system.",
+
+        "imc_definition_v2": "In-memory computing enables parallel processing by performing arithmetic operations directly within memory arrays, eliminating the need for data movement between processor and memory in the architecture.",
+
+        "imc_definition_v3": "Processing in memory is an emerging non-von Neumann computational paradigm whose key idea is to perform certain computational tasks in place in memory, thereby obviating the need to shuttle data back and forth between the processing and memory in the system.",
+
+        "imc_synonym": "Processing in memory is an emerging non-von Neumann computational paradigm whose key idea is to perform certain computational tasks in place in memory, thereby obviating the need to shuttle data back and forth between the processing and memory units.",
         
-        "imc2": "Processing in memory is an emerging non-von Neumann computational paradigm whose key idea is to perform certain computational tasks in place in memory, thereby obviating the need to shuttle data back and forth between the processing and memory units.",
-        
-        "imc3": "In-memory computation works by eliminating all slow data accesses and relying exclusively on data stored in RAM. Overall computation performance is greatly improved by removing the latency commonly seen when accessing hard disk drives or SSDs.",
+        "imc_technical": "In-memory computing (IMC) architectures exploit the analog summation properties of memory bit-cells—often organized as resistive crossbars or SRAM subarrays-to perform vector-matrix multiplications directly where the data resides, mitigating the von Neumann bottleneck and enabling high-throughput, low-energy compute.",
         
         "imc_para": "In-memory computing (IMC) is an emerging non-von Neumann computational paradigm that keeps alive the promise of achieving energy efficiencies on the order of one femtoJoule per operation in a computing system. The key idea is to perform certain computational tasks in place in memory, thereby obviating the need to shuttle data back and forth between the processing and memory units. The time and energy cost associated with this data movement is by far the most severe roadblock for modern computing systems. IMC is often achieved by exploiting the physical attributes of the memory devices, their array-level organization, etc. IMC has found application in a range of applications such as scientific computing, database query, machine learning etc. However, the most promising application for IMC is for efficient realization of deep neural networks (DNNs) that have revolutionized AI in recent years. A key challenge for DNNs is its computational inefficiency. In fact, the lack of sufficient compute power was one of the key factors that held back progress in the field for almost 30 years.",
         
-        "imc2_para": "In-memory computing (IMC) is a technology that stores data in the main memory (RAM) of a computing system rather than on traditional disk storage. This approach allows for significantly faster data retrieval and processing times, making it ideal for applications requiring real-time or near-real-time data analysis and decision-making.",
+        "imc_layman": "In-memory computing means the computer “thinks” inside the memory itself. Instead of moving data around, the calculations happen where the data already lives, making everything faster and more power-efficient.",
+
+        "imc_analogy": "IMC is like doing laundry inside your wardrobe instead of carrying clothes back and forth to a laundromat - everything happens where the items already are, saving huge time and effort.",
         
-        "imc_word": "In-memory computing",
-        "imc2_word": "Processing in memory",
+        "imc_detail": "RRAM-based in-memory computing leverages resistive crossbar arrays where Ohmic currents naturally perform analog matrix-vector multiplication, enabling massively parallel multiply-accumulate operations within the memory fabric.",
         
+        "imc_detail_v2": "Crossbar IMC arranges memory cells in a grid where input voltages applied to rows generate aggregated currents on columns, inherently performing vector-matrix multiplication through Kirchhoff's laws.",
+        
+        "imc_application": "In-memory computing accelerates deep neural networks by mapping weights into memory arrays and executing matrix multiplications inside the memory fabric, providing orders-of-magnitude improvements in energy per inference.",
         # Pizza prompts
-        "pizzas": "Pizza is a dish of Italian origin consisting of a usually round, flat base of leavened wheat-based dough topped with tomatoes, cheese, and often various other ingredients (such as anchovies, mushrooms, olives, vegetables, meat, etc.), baked at a high temperature, traditionally in a wood-fired oven.",
-        
-        "pizzas_para": "Neapolitan pizza is a style of pizza from Naples, Italy, known for its soft, thin dough with a raised, airy crust called the cornicione. It is traditionally cooked at very high temperatures in a wood-fired oven, which creates charred leoparding on the crust. Key characteristics include a simple topping of fresh, high-quality ingredients, such as tomatoes, fresh mozzarella, basil, and olive oil. Neapolitan pizza (Italian: pizza napoletana; Neapolitan: pizza napulitana) is the version of the round pizza typically prepared in the Italian city of Naples and characterised by a soft, thin dough with high edges.[1] The tomatoes are traditionally either San Marzano tomatoes or pomodorini del Piennolo del Vesuvio, which grow on the volcanic plains to the south of Mount Vesuvius, and the cheese is traditionally mozzarella di bufala campana or fior di latte di Agerola. Pizza napoletana is a traditional speciality guaranteed (TSG) product in the European Union and the United Kingdom, and the art of its making (arte del pizzaiolo napoletano) is included on UNESCO's list of intangible cultural heritage.",
-        
-        "pizzas_word": "Neapolitan pizza",
-        
+        "pizza_key": "Pizza",
+
+        "pizza_synonym_key": "Neapolitan pizza",
+
+        "pizza_definition": "Pizza is a traditional Italian dish consisting of a flat, leavened dough base topped with tomato sauce, cheese, and various ingredients, baked at high temperatures to produce a crisp yet tender crust.",
+
+        "pizza_synonym": "Neapolitan pizza is an authentic style from Naples characterized by a soft, thin dough with a raised, airy crust, simple toppings of tomatoes, mozzarella, basil, and olive oil, and baking in a blazing-hot wood-fired oven.",
+
+        "pizza_technical": "Neapolitan pizza follows strict preparation standards: a hydrated dough fermented for 8–24 hours, San Marzano or Vesuvio tomatoes, fresh mozzarella (fior di latte or bufala), and a 430–485°C wood-fired oven delivering rapid Maillard browning and characteristic cornicione blistering.",
+
+        "pizza_para": "Pizza, especially the Neapolitan variant, represents centuries of culinary craftsmanship rooted in Naples, Italy. The dough is formulated with high-protein wheat flour and undergoes controlled fermentation to produce its signature light and airy structure. Traditional recipes mandate tomatoes grown in the volcanic soils of Mount Vesuvius and fresh mozzarella made from water buffalo milk. Cooking is performed in a wood-fired oven reaching nearly 500°C, allowing the pizza to bake in under 90 seconds. These high temperatures generate the iconic leopard-spotted crust through intense radiant heat and rapid caramelization. Recognized by the European Union as a Traditional Speciality Guaranteed (TSG) product, Neapolitan pizza's preparation method is also listed by UNESCO as intangible cultural heritage.",
+
+        "pizza_layman": "Pizza is basically a tasty flatbread with sauce and cheese baked in a super hot oven. It’s crispy on the outside, soft inside, and you can add almost anything on top — vegetables, meats, or just cheese.",
+
+        "pizza_analogy": "Making pizza is like painting on warm bread — the dough is your canvas, the sauce is your base color, and toppings are the creative details. The oven acts like a powerful spotlight that brings the artwork to life in just a minute or two.",
+
+        "pizza_detail": "Neapolitan pizzas are baked in traditional wood-fired ovens where temperatures exceed 430°C, creating intense radiant heat that produces a blistered, smoky crust and melts fresh mozzarella into delicate, creamy layers.",
+
+        "pizza_detail_v2": "Authentic pizza dough uses a long fermentation process that develops gluten elasticity and complex flavor compounds. Controlled hydration, yeast activity, and high-heat baking combine to produce the iconic puffy cornicione and soft interior crumb structure.",
+
+        "pizza_application": "Pizza has become a globally adaptable food platform with thousands of regional variations, from New York–style thin crusts to deep-dish Chicago pies, each leveraging different dough techniques, toppings, and baking methods to create distinct culinary experiences.",
         # Actress prompts
-        "actress": "Anne Jacqueline Hathaway is an American actress. Her accolades include an Academy Award, a British Academy Film Award, a Golden Globe Award, and a Primetime Emmy Award. Her films have grossed over $6.8 billion worldwide, and she appeared on the Forbes Celebrity 100 list in 2009.",
-        
-        "actress_para": "Anne Jacqueline Hathaway (born November 12, 1982) is an American actress. Her accolades include an Academy Award, a British Academy Film Award, a Golden Globe Award, and a Primetime Emmy Award. Her films have grossed over $6.8 billion worldwide, and she appeared on the Forbes Celebrity 100 list in 2009. She was among the world's highest-paid actresses in 2015. Hathaway performed in several plays in high school. As a teenager, she was cast in the television series Get Real (1999–2000) and made her breakthrough by playing the lead role in the Disney comedy The Princess Diaries (2001). After starring in a string of family films, including Ella Enchanted (2004), Hathaway made a transition to mature roles with the 2005 drama Brokeback Mountain. The comedy-drama The Devil Wears Prada (2006), in which she played an assistant to a fashion magazine editor, was her biggest commercial success to that point. She played a recovering addict in the drama Rachel Getting Married (2008), which earned her a nomination for the Academy Award for Best Actress.",
-        
-        "actress_word": "Anne Hathaway",
-        
+        "actress_key": "Anne Hathaway",
+
+        "actress_synonym_key": "American film actress",
+
+        "actress_definition": "Anne Hathaway is an acclaimed American actress known for her versatility across comedy, drama, and musical films, earning major awards including an Academy Award, a BAFTA, a Golden Globe, and an Emmy.",
+
+        "actress_synonym": "As an American film actress, Anne Hathaway has built a career marked by critically acclaimed roles across genres, becoming one of Hollywood’s most recognizable and decorated performers.",
+
+        "actress_technical": "Anne Hathaway is an established Hollywood performer whose portfolio spans commercial blockbusters and prestige films. Her career is marked by a wide acting range—from comedic roles in early family films to complex dramatic performances in award-winning productions—earning her recognition from major institutions such as the Academy of Motion Picture Arts and Sciences, BAFTA, and the Hollywood Foreign Press Association.",
+
+        "actress_para": "Anne Jacqueline Hathaway (born November 12, 1982) is a prominent American actress whose career has evolved from teen-oriented films to sophisticated dramatic roles. Rising to fame with *The Princess Diaries* (2001), she soon transitioned into more mature cinema, earning critical acclaim with performances in films such as *Brokeback Mountain* (2005), *The Devil Wears Prada* (2006), and *Rachel Getting Married* (2008), the last of which secured her an Academy Award nomination. Over the years, Hathaway has accumulated numerous accolades, including an Academy Award, a BAFTA, a Golden Globe, and an Emmy. With her films grossing over $6.8 billion worldwide, she has been featured on Forbes’ Celebrity 100 list and ranked among the highest-paid actresses globally.",
+
+        "actress_layman": "Anne Hathaway is a famous American actress who’s been in many hit movies—from *The Princess Diaries* to *The Devil Wears Prada*. She’s known for being able to play all kinds of characters and has won some of the biggest awards in Hollywood.",
+
+        "actress_analogy": "Anne Hathaway is like a Swiss Army knife in Hollywood — adaptable, reliable, and able to take on almost any role with skill and precision, whether it's comedy, drama, or musicals.",
+
+        "actress_detail": "Hathaway's critical peak includes transformative performances such as her role as Fantine in *Les Misérables* (2012), for which she underwent significant physical preparation and vocal training, ultimately earning the Academy Award for Best Supporting Actress. Her filmography spans independent dramas, large-scale productions like *The Dark Knight Rises* (2012), and genre-crossing films, demonstrating her ability to inhabit deeply emotional, comedic, or physically demanding roles.",
+
+        "actress_detail_v2": "In addition to screen performances, Hathaway has contributed to voice acting, television guest roles, and stage work, showcasing a multifaceted acting profile. She maintains strong industry relevance through collaborations with renowned directors, ongoing participation in high-grossing franchises, and consistent reinvention across decades of acting.",
+
+        "actress_application": "Anne Hathaway's diverse acting repertoire makes her a key figure for casting directors seeking performers capable of carrying emotional depth, comedic timing, or high-intensity roles. Her proven box-office draw and critical acclaim position her as a strong choice for prestige cinema, franchise films, musicals, and character-driven narrative projects.",
+            
         # Other prompts
-        "astrophysics": "Dark matter constitutes approximately 27 percent of the universe's mass-energy content, yet its composition remains one of the most profound mysteries in astrophysics. Recent studies suggest that",
-        
-        "astro_word": "Dark matter",
-        
-        "maths": "(2*3 + 5-1)/2 + 10*(4+2)-3=48",
+        "cs_key" : "Computer Science",
+
+        "cs_synonym_key": "Computing",
+
+        "cs_definition": "Computer science is the study of computation, algorithms, data structures, and the principles governing the design and analysis of software and hardware systems.",
+
+        "cs_synonym": "Computing is the discipline focused on understanding how information is represented, processed, stored, and communicated through computational systems, encompassing theory, programming, and system design.",
+
+        "cs_technical": "Computer science is a formal scientific and engineering field that examines computation both as a mathematical abstraction and as a practical process implemented through digital hardware, programming languages, and algorithmic logic. It spans subfields such as complexity theory, operating systems, computer architecture, networks, machine learning, databases, and cybersecurity.",
+
+        "cs_para": "Computer science is a broad discipline concerned with understanding and building computational systems. It includes theoretical foundations such as algorithms, automata theory, and computational complexity, as well as applied areas such as software engineering, artificial intelligence, distributed systems, human-computer interaction, and computer graphics. The field shapes almost every aspect of modern technology, from internet infrastructure to smart devices. By studying representation of data, efficiency of algorithms, and design of hardware–software interfaces, computer science enables innovation across scientific research, industry, and everyday applications.",
+
+        "cs_layman": "Computer science is the field that teaches how computers work and how to make them do useful things. It involves learning how to solve problems using logic, code, and digital systems.",
+
+        "cs_analogy": "Computer science is like learning the rules of a giant puzzle-making universe—once you understand the pieces (algorithms, data, logic), you can build anything from simple tools to complex machines.",
+
+        "cs_detail": "Core branches of computer science include algorithm design, data structures, programming languages, and systems architecture. Advanced areas extend into artificial intelligence, distributed computing, information security, cloud systems, and computational biology. The field often collaborates with mathematics, electrical engineering, and cognitive science to build optimized, scalable, and reliable computational frameworks.",
+
+        "cs_detail_v2": "Modern computer science research explores problems such as efficient large-scale computation, parallel processing models, secure communication protocols, compiler optimizations, machine learning algorithms, and the integration of hardware accelerators—including GPUs, TPUs, and custom ASICs—into heterogeneous architectures.",
+
+        "cs_application": "Computer science underpins modern technologies including internet services, machine learning models, cybersecurity systems, computational simulations, autonomous robotics, distributed cloud platforms, and embedded computing. It enables the development of scalable software systems, high-performance computation, and intelligent algorithms that power today's digital world."
     }
     
     # Get the base prompt text
@@ -288,7 +347,10 @@ def main():
                             '"0-5:0.6" (60%% to layers 0-5), '
                             '"0-5:0.6,6-11:0.8" (mixed ranges)')
     parser.add_argument('--maskingStep', type=int, default=None, help='Step at which to start masking neurons')
-    
+    parser.add_argument('--ranking_method', type=str, default="combined", 
+                   help='Method to rank neurons for pruning - max, mean, combined, product, magnitude')
+    parser.add_argument('--prune_strategy', type=str, default="topk", help='Pruning strategy - topk, automatic configure threshold as mean')
+
     # Evaluation arguments
     #### Perplexity
     parser.add_argument('--eval_perplexity', action='store_true', help='Evaluate perplexity on datasets')
@@ -358,6 +420,7 @@ def main():
     post_mlp2_activations = defaultdict(list)    # For storing the activations after the MLP layers
     post_layer_activations = defaultdict(list)  # For storing the activations after the complete transformer block
     mlp2_forward_proxy = {}
+    mlp2_weights = {}
 
     # Get embedding weights based on model type
     if model_type == 'gpt2':
@@ -385,6 +448,8 @@ def main():
     neuronDefuser = NeuronDefuser(
         maskingStep=args.maskingStep, 
         per_layer_topk=per_layer_config,
+        ranking_method=args.ranking_method,
+        prune_strategy=args.prune_strategy,
         device=device
     )
     
@@ -402,7 +467,7 @@ def main():
             model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
             post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-            mlp2_forward_proxy, embedding_weights, save_activations=args.save_activations
+            mlp2_forward_proxy, embedding_weights, mlp2_weights, save_activations=args.save_activations
         )
     profiler.end("hook_setup")
 
@@ -469,6 +534,7 @@ def main():
                 'pre_mlp2_activations': pre_mlp2_activations,
                 'post_mlp2_activations': post_mlp2_activations,
                 'post_layer_activations': post_layer_activations,
+                'mlp2_weights': mlp2_weights,
                 'mlp2_forward_proxy': mlp2_forward_proxy,
                 'model_type': model_type
             }, f)
@@ -615,7 +681,7 @@ def evaluate_mmlu_multi_shot(model, tokenizer, device, subjects, max_samples=Non
     wrapped_model = HFLM(
         pretrained=model,      # Your edited model with hooks
         tokenizer=tokenizer,   # Your tokenizer
-        batch_size=32,          # Keep at 1 for safety with hooks
+        batch_size=16,          # Keep at 1 for safety with hooks
         device=str(device)
     )
 
@@ -624,7 +690,7 @@ def evaluate_mmlu_multi_shot(model, tokenizer, device, subjects, max_samples=Non
         model_args=None,  # Not needed since we're passing the model directly
         tasks=task_names,
         num_fewshot=shots,
-        batch_size=32,  # Keep at 1 to avoid issues with your hooks
+        batch_size=16,  # Keep at 1 to avoid issues with your hooks
         device=str(device),
         limit=max_samples,  # Limit samples per task (None = all samples)
         log_samples=True,  # Set True if you want detailed sample-level results

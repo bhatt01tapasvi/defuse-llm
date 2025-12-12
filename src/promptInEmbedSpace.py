@@ -246,138 +246,6 @@ def compareDomainConsistency(data_a: Dict[str, Any], data_b: Dict[str, Any], emb
     save_path = os.path.join(DOMAIN_CONSISTENCY_DIR, "domain_consistency_analysis.csv")
     create_consistency_table(token_comp_list, sent_comp_list, save_path, f"Domain Consistency Table")
 
-def analyze_representation_structure(data, name, layer='block_11'):
-    """
-    Understand what's happening in your representations
-    """
-    mlp_acts = data['pre_ln2_activations'][layer][-1]  # (num_tokens, embed_dim)
-    
-    print(f"\n{'='*60}")
-    print(f"Representation Analysis: {name} - {layer}")
-    print(f"{'='*60}")
-    
-    # 1. Dimensionality analysis
-    from sklearn.decomposition import PCA
-    pca = PCA()
-    pca.fit(mlp_acts)
-    
-    # How many dimensions capture 90%, 95%, 99% of variance?
-    cumsum = np.cumsum(pca.explained_variance_ratio_)
-    dims_90 = np.argmax(cumsum >= 0.90) + 1
-    dims_95 = np.argmax(cumsum >= 0.95) + 1
-    dims_99 = np.argmax(cumsum >= 0.99) + 1
-    
-    print(f"\nEffective Dimensionality:")
-    print(f"  90% variance captured by: {dims_90} dims (out of {mlp_acts.shape[1]})")
-    print(f"  95% variance captured by: {dims_95} dims")
-    print(f"  99% variance captured by: {dims_99} dims")
-    print(f"  → Effective dim ratio: {dims_90/mlp_acts.shape[1]:.2%}")
-    
-    # 2. Sparsity analysis
-    abs_acts = np.abs(mlp_acts)
-    threshold_99 = np.percentile(abs_acts, 99)
-    threshold_95 = np.percentile(abs_acts, 95)
-    threshold_90 = np.percentile(abs_acts, 90)
-    
-    active_99 = (abs_acts > threshold_99).sum() / abs_acts.size
-    active_95 = (abs_acts > threshold_95).sum() / abs_acts.size
-    active_90 = (abs_acts > threshold_90).sum() / abs_acts.size
-    
-    print(f"\nActivation Sparsity:")
-    print(f"  Top 1% threshold: {threshold_99:.4f}, Active: {active_99:.2%}")
-    print(f"  Top 5% threshold: {threshold_95:.4f}, Active: {active_95:.2%}")
-    print(f"  Top 10% threshold: {threshold_90:.4f}, Active: {active_90:.2%}")
-    
-    # 3. Last token analysis
-    last_token = mlp_acts[-1]
-    top_10_dims = np.argsort(np.abs(last_token))[-10:]
-    
-    print(f"\nLast Token Top-10 Dimensions:")
-    print(f"  Indices: {top_10_dims}")
-    print(f"  Values: {last_token[top_10_dims]}")
-    print(f"  Magnitude: {np.linalg.norm(last_token):.4f}")
-    
-    return {
-        'pca': pca,
-        'dims_90': dims_90,
-        'top_dims_last_token': top_10_dims,
-        'last_token': last_token
-    }
-
-def analyze_mlp_residual_impact(pre_mlp_acts: Dict[str, list], post_mlp_acts: Dict[str, list]):
-    """
-    Compare residual stream before MLP vs after adding MLP output
-    
-    Residual connection: residual_after = residual_before + MLP(residual_before)
-    
-    Where:
-    - residual_before = pre_mlp_acts (input to MLP, also passed through residual)
-    - MLP_output = post_mlp_acts (what MLP computed)
-    - residual_after = pre_mlp_acts + post_mlp_acts (final residual after adding MLP)
-    
-    We compare residual_before vs residual_after to see MLP's impact
-    """
-    
-    results = []
-    
-    for layer_name in pre_mlp_acts.keys():
-        # Single prefill pass - take the last (and only) forward pass
-        residual_before = pre_mlp_acts[layer_name][-1]  # Shape: (num_tokens, embed_dim)
-        mlp_output = post_mlp_acts[layer_name][-1]  # Shape: (num_tokens, embed_dim)
-        
-        # Construct the residual stream after adding MLP output
-        residual_after = residual_before + mlp_output
-        
-        num_tokens = residual_before.shape[0]
-        
-        # Token-wise analysis
-        token_similarities = []
-        token_distances = []
-        token_relative_changes = []
-        token_mlp_norms = []
-        token_before_norms = []
-        token_after_norms = []
-        
-        for token_idx in range(num_tokens):
-            before = residual_before[token_idx]
-            after = residual_after[token_idx]
-            mlp_delta = mlp_output[token_idx]
-            
-            # Metrics
-            cos_sim = cosine_similarity(before, after)
-            eucl_dist = euclidean_distance(before, after)
-            
-            before_norm = np.linalg.norm(before)
-            after_norm = np.linalg.norm(after)
-            mlp_norm = np.linalg.norm(mlp_delta)
-            
-            relative_change = mlp_norm / (before_norm + 1e-8)
-            
-            token_similarities.append(cos_sim)
-            token_distances.append(eucl_dist)
-            token_relative_changes.append(relative_change)
-            token_mlp_norms.append(mlp_norm)
-            token_before_norms.append(before_norm)
-            token_after_norms.append(after_norm)
-        
-        # Aggregate for this layer
-        layer_result = {
-            'layer': layer_name,
-            'avg_cosine_sim': np.mean(token_similarities),
-            'min_cosine_sim': np.min(token_similarities),
-            'max_cosine_sim': np.max(token_similarities),
-            'avg_euclidean': np.mean(token_distances),
-            'avg_relative_change': np.mean(token_relative_changes),
-            'max_relative_change': np.max(token_relative_changes),
-            'avg_mlp_norm': np.mean(token_mlp_norms),
-            'avg_before_norm': np.mean(token_before_norms),
-            'avg_after_norm': np.mean(token_after_norms),
-        }
-        
-        results.append(layer_result)
-    
-    return results
-
 def create_comparison_table_mlp(results: list, path_to_save: str, dataset_name: str):
     """Create a formatted table for MLP impact results"""
     
@@ -407,53 +275,210 @@ def create_comparison_table_mlp(results: list, path_to_save: str, dataset_name: 
     
     return df
 
-def compareMLPImpact(datasets: list[Tuple[str, Any]]):
+def compare_activation_states(
+    activations_before: Dict[str, list], 
+    activations_after: Dict[str, list],
+    comparison_name: str = "Activation Comparison"
+):
     """
-    Analyze MLP impact for multiple datasets
+    General function to compare two activation states.
     """
+    
+    results = []
+    
+    for layer_name in activations_before.keys():
+        # ===== CONVERT TO FLOAT64 FIRST! =====
+        before_float16 = activations_before[layer_name][-1]  # Original float16
+        after_float16 = activations_after[layer_name][-1]    # Original float16
+        
+        # Check for inf/nan in ORIGINAL data (before conversion)
+        before_has_inf = np.any(np.isinf(before_float16))
+        after_has_inf = np.any(np.isinf(after_float16))
+        
+        if before_has_inf or after_has_inf:
+            print(f"\n⚠️  Float16 overflow detected in layer {layer_name}:")
+            if before_has_inf:
+                num_inf = np.sum(np.isinf(before_float16))
+                total_elements = before_float16.size
+                pct_inf = (num_inf / total_elements) * 100
+                max_finite = np.max(before_float16[np.isfinite(before_float16)])
+                print(f"    'before': {num_inf}/{total_elements} values are inf ({pct_inf:.1f}%)")
+                print(f"    Max finite value: {max_finite:.2e}")
+            if after_has_inf:
+                num_inf = np.sum(np.isinf(after_float16))
+                total_elements = after_float16.size
+                pct_inf = (num_inf / total_elements) * 100
+                max_finite = np.max(after_float16[np.isfinite(after_float16)])
+                print(f"    'after': {num_inf}/{total_elements} values are inf ({pct_inf:.1f}%)")
+                print(f"    Max finite value: {max_finite:.2e}")
+        
+        # NOW convert to float64 (this won't fix existing inf, but prevents new overflow)
+        before = before_float16.astype(np.float64)  # Shape: (num_tokens, embed_dim)
+        after = after_float16.astype(np.float64)    # Shape: (num_tokens, embed_dim)
+        
+        num_tokens = before.shape[0]
+        
+        # Token-wise analysis
+        token_similarities = []
+        token_distances = []
+        token_relative_changes = []
+        token_delta_norms = []
+        token_before_norms = []
+        token_after_norms = []
+        
+        skipped_tokens = 0
+        
+        for token_idx in range(num_tokens):
+            tok_before = before[token_idx]  # Already float64
+            tok_after = after[token_idx]    # Already float64
+            
+            # Check if THIS TOKEN has inf/nan (from original float16 overflow)
+            has_inf_before = np.any(np.isinf(tok_before)) or np.any(np.isnan(tok_before))
+            has_inf_after = np.any(np.isinf(tok_after)) or np.any(np.isnan(tok_after))
+            
+            if has_inf_before or has_inf_after:
+                skipped_tokens += 1
+                continue  # Skip this token
+            
+            # Compute delta (what changed)
+            delta = tok_after - tok_before
+            
+            # Compute norms (safe now, no inf in inputs)
+            before_norm = np.linalg.norm(tok_before)
+            after_norm = np.linalg.norm(tok_after)
+            delta_norm = np.linalg.norm(delta)
+            
+            # Sanity check: if norm computation overflows in float64 (very rare)
+            if np.isinf(delta_norm) or np.isinf(before_norm) or np.isinf(after_norm):
+                print(f"⚠️  Norm overflow in float64 at layer {layer_name}, token {token_idx}")
+                print(f"    This is unusual - check data integrity!")
+                skipped_tokens += 1
+                continue
+            
+            # Metrics
+            cos_sim = cosine_similarity(tok_before, tok_after)
+            eucl_dist = euclidean_distance(tok_before, tok_after)
+            
+            # Relative change
+            if before_norm < 1e-8:
+                relative_change = 0.0 if delta_norm < 1e-8 else 1e6
+            else:
+                relative_change = delta_norm / before_norm
+                relative_change = min(relative_change, 1e6)
+            
+            token_similarities.append(cos_sim)
+            token_distances.append(eucl_dist)
+            token_relative_changes.append(relative_change)
+            token_delta_norms.append(delta_norm)
+            token_before_norms.append(before_norm)
+            token_after_norms.append(after_norm)
+        
+        if skipped_tokens > 0:
+            print(f"    Skipped {skipped_tokens}/{num_tokens} tokens due to inf/nan")
+        
+        # Safe aggregation
+        def safe_mean(values):
+            if not values:
+                return 0.0
+            finite_values = [v for v in values if np.isfinite(v)]
+            return np.mean(finite_values) if finite_values else 0.0
+        
+        def safe_max(values):
+            if not values:
+                return 0.0
+            finite_values = [v for v in values if np.isfinite(v)]
+            return np.max(finite_values) if finite_values else 0.0
+        
+        def safe_min(values):
+            if not values:
+                return 0.0
+            finite_values = [v for v in values if np.isfinite(v)]
+            return np.min(finite_values) if finite_values else 0.0
+        
+        # Aggregate for this layer
+        layer_result = {
+            'layer': layer_name,
+            'avg_cosine_sim': safe_mean(token_similarities),
+            'min_cosine_sim': safe_min(token_similarities),
+            'max_cosine_sim': safe_max(token_similarities),
+            'avg_euclidean': safe_mean(token_distances),
+            'avg_relative_change': safe_mean(token_relative_changes),
+            'max_relative_change': safe_max(token_relative_changes),
+            'avg_delta_norm': safe_mean(token_delta_norms),
+            'avg_before_norm': safe_mean(token_before_norms),
+            'avg_after_norm': safe_mean(token_after_norms),
+            'num_valid_tokens': len(token_similarities),
+            'num_total_tokens': num_tokens,
+            'num_skipped_tokens': skipped_tokens,
+        }
+        
+        results.append(layer_result)
+    
+    return results
+
+
+def compareMLPImpact(datasets: list[Tuple[str, Any]], model_name: str = "unknown_model"):
+    """
+    Analyze MLP impact by comparing residual stream before and after MLP.
+    
+    In transformer: residual_after = residual_before + MLP(residual_before)
+    
+    We compare:
+    - Before: pre_ln2_activations (residual stream entering MLP block)
+    - After: post_layer_activations (residual stream after MLP added)
+    
+    Args:
+        datasets: List of (dataset_name, data) tuples
+        model_name: Name of the model being analyzed (creates subdirectory)
+    """
+    
+    # Create model-specific subdirectory
+    model_mlp_dir = os.path.join(MLP_IMPACT_DIR, model_name)
+    os.makedirs(model_mlp_dir, exist_ok=True)
     
     print("\n" + "="*80)
     print("MLP RESIDUAL STREAM IMPACT ANALYSIS")
-    print("Comparing: Residual_Before vs Residual_After = Residual_Before + MLP_Output")
+    print(f"Model: {model_name}")
+    print("Comparing: Pre-MLP Residual vs Post-Layer Residual")
     print("="*80)
+    print(f"Results will be saved to: {model_mlp_dir}\n")
     
     all_results = {}
     
     for dataset_name, data in datasets:
-    #     # Check if the residual connection math is consistent
-    #     # Compare layer by layer, token by token
-    #     is_consistent = True
+        print(f"\nAnalyzing dataset: {dataset_name}")
         
-    #     for layer_name in data['pre_ln2_activations'].keys():
-    #         print(len(data['pre_ln2_activations'][layer_name]),len(data['pre_ln2_activations'][layer_name][0][0]))
-    #         pre_ln2 = data['pre_ln2_activations'][layer_name][-1]  # (num_tokens, embed_dim)
-    #         post_mlp2 = data['post_mlp2_activations'][layer_name][-1]  # (num_tokens, embed_dim)
-    #         post_layer = data['post_layer_activations'][layer_name][-1]  # (num_tokens, embed_dim)
+        # Verify data consistency (optional but good practice)
+        is_consistent = True
+        for layer_name in data['pre_ln2_activations'].keys():
+            pre_ln2 = data['pre_ln2_activations'][layer_name][-1]
+            post_mlp2 = data['post_mlp2_activations'][layer_name][-1]
+            post_layer = data['post_layer_activations'][layer_name][-1]
             
-    #         # Check if: post_layer = pre_ln2 + post_mlp2
-    #         expected = pre_ln2 + post_mlp2
+            # Check if: post_layer ≈ pre_ln2 + post_mlp2
+            expected = pre_ln2 + post_mlp2
             
-    #         if not np.allclose(expected, post_layer, rtol=1e-5, atol=1e-6):
-    #             print(f"⚠️  Data inconsistency in dataset: {dataset_name}, layer: {layer_name}")
-    #             print(f"    Expected shape: {expected.shape}, Got: {post_layer.shape}")
-    #             print(f"    Max difference: {np.max(np.abs(expected - post_layer)):.6f}")
-    #             is_consistent = False
-    #             break
+            if not np.allclose(expected, post_layer, rtol=1e-5, atol=1e-6):
+                print(f"⚠️  Data inconsistency in layer {layer_name}")
+                print(f"    Max difference: {np.max(np.abs(expected - post_layer)):.6f}")
+                is_consistent = False
+                break
         
-    #     if not is_consistent:
-    #         print(f"❌ Skipping analysis for {dataset_name} due to inconsistency.\n")
-    #         continue
+        if not is_consistent:
+            print(f"❌ Skipping {dataset_name} due to inconsistency.\n")
+            continue
         
-    #    print(f"✓ Data consistency verified for {dataset_name}")
+        print(f"✓ Data consistency verified")
         
-        # Analyze this dataset
-        results = analyze_mlp_residual_impact(
-            data['pre_ln2_activations'],  # Residual before MLP
-            data['post_mlp2_activations']  # MLP output (to be added to residual)
+        # Compare pre-MLP vs post-layer (which includes MLP contribution)
+        results = compare_activation_states(
+            activations_before=data['pre_ln2_activations'],
+            activations_after=data['post_layer_activations'],
+            comparison_name=f"{dataset_name} MLP Impact"
         )
         
-        # Save results
-        save_path = os.path.join(MLP_IMPACT_DIR, f"{dataset_name}_mlp_impact.csv")
+        # Save results to model-specific directory
+        save_path = os.path.join(model_mlp_dir, f"{dataset_name}_mlp_impact.csv")
         df = create_comparison_table_mlp(results, save_path, dataset_name)
         
         all_results[dataset_name] = df
@@ -486,116 +511,132 @@ def structure_explainer(data: dict[str, Any]=None):
         print(f"  Sample layer names: {layer_names}{'...' if len(activation_dict) > 3 else ''}")
 
 def main():
-    # activation_imc = "results/prompts/long/imc/activations.pkl"
-    # data_imc = data_loader(activation_imc)
-
-    # activation_astro = "results/prompts/long/astro/activations.pkl"
-    # data_astro = data_loader(activation_astro)
-
-    # activation_imc2 = "results/prompts/long/imc2/activations.pkl"
-    # data_imc2 = data_loader(activation_imc2)
-
-    # activation_imc3 = "results/prompts/long/imc3/activations.pkl"
-    # data_imc3 = data_loader(activation_imc3)
-
-    # activation_pizzas = "results/prompts/long/pizzas/activations.pkl"
-    # data_pizzas = data_loader(activation_pizzas)
-
-    # activation_actress = "results/prompts/long/actress/activations.pkl"
-    # data_actress = data_loader(activation_actress)
-
-    # activation_hindi = "results/prompts/long/hindi/activations.pkl"
-    # data_hindi = data_loader(activation_hindi)
-
-    # activation_maths = "results/prompts/long/maths/activations.pkl"
-    # data_maths = data_loader(activation_maths)
-
-    # activation_imc_word = "results/prompts/short/imc_word/activations.pkl"
-    # data_imc_word = data_loader(activation_imc_word)
-
-    # activation_imc2_word = "results/prompts/short/imc2_word/activations.pkl"
-    # data_imc2_word = data_loader(activation_imc2_word)
-
-    # activation_pizzas_word = "results/prompts/short/pizzas_word/activations.pkl"
-    # data_pizzas_word = data_loader(activation_pizzas_word)
-
-    # activation_actress_word = "results/prompts/short/actress_word/activations.pkl"
-    # data_actress_word = data_loader(activation_actress_word)
-
-    # activation_astro_word = "results/prompts/short/astro_word/activations.pkl"
-    # data_astro_word = data_loader(activation_astro_word)
-
-    # activation_imc2_para = "results/prompts/para/imc2/activations.pkl"
-    # data_imc2_para = data_loader(activation_imc2_para)
-
-    # activation_imc_para = "results/prompts/para/imc/activations.pkl"
-    # data_imc_para = data_loader(activation_imc_para)
+    # ============================================================================
+    # AUTO-DISCOVER ACTIVATION FILES
+    # ============================================================================
     
-    # activation_pizzas_para = "results/prompts/para/pizzas/activations.pkl"
-    # data_pizzas_para = data_loader(activation_pizzas_para)
-
-    # activation_actress_para = "results/prompts/para/actress/activations.pkl"
-    # data_actress_para = data_loader(activation_actress_para)
-
-    # activation_gpt_ask1 = "results/prompts/gpt/ask1/activations.pkl"
-    # data_gpt_ask1 = data_loader(activation_gpt_ask1)
-
-    # activation_gpt_reply1 = "results/prompts/gpt/reply1/activations.pkl"
-    # data_gpt_reply1 = data_loader(activation_gpt_reply1)
-
-    # all_datasets = [
-    #     ("IMC", data_imc), ("Astro", data_astro), ("IMC2", data_imc2), ("IMC3", data_imc3),
-    #     ("Pizzas", data_pizzas), ("Actress", data_actress), ("Hindi", data_hindi), ("Maths", data_maths),
-    #     ("IMC_word", data_imc_word), ("IMC2_word", data_imc2_word), ("Pizzas_word", data_pizzas_word),
-    #     ("Actress_word", data_actress_word), ("Astro_word", data_astro_word),
-    #     ("IMC2_para", data_imc2_para), ("IMC_para", data_imc_para), 
-    #     ("Pizzas_para", data_pizzas_para), ("Actress_para", data_actress_para),
-    #     ("GPT_ask1", data_gpt_ask1), ("GPT_reply1", data_gpt_reply1)
-    # ]
-
-    # normal_datasets = [
-    #     ("IMC", data_imc), ("Astro", data_astro), ("IMC2", data_imc2), ("IMC3", data_imc3),
-    #     ("Pizzas", data_pizzas), ("Actress", data_actress), ("Hindi", data_hindi), ("Maths", data_maths)
-    # ]
-
-    # word_datasets = [
-    #     ("IMC_word", data_imc_word), ("IMC2_word", data_imc2_word), ("Pizzas_word", data_pizzas_word),
-    #     ("Actress_word", data_actress_word), ("Astro_word", data_astro_word)
-    # ]
-
-    # para_datasets = [
-    #     ("IMC2_para", data_imc2_para), ("IMC_para", data_imc_para),
-    #     ("Pizzas_para", data_pizzas_para), ("Actress_para", data_actress_para)
-    # ]
-
-    #compute_global_means(all_datasets, embed="pre_ln2_activations")
-    #print(f"\nGlobal means computed for {len(global_means)} layers")
-
-    # Quick overview of the structure of the datasets
-    #structure_explainer(data_imc)
-
+    print("\n" + "="*80)
+    print("AUTO-DISCOVERING ACTIVATION FILES")
+    print("="*80)
+    
+    # Base path for results
+    activations_base_dir = os.path.join(RESULTS_DIR, "activations")
+    
+    # Model to analyze (you can make this a parameter later)
+    target_model = "meta-llama_Llama-3.2-3B"
+    model_dir = os.path.join(activations_base_dir, target_model)
+    
+    if not os.path.exists(model_dir):
+        print(f"❌ Model directory not found: {model_dir}")
+        print(f"   Available models:")
+        if os.path.exists(activations_base_dir):
+            for model_name in os.listdir(activations_base_dir):
+                model_path = os.path.join(activations_base_dir, model_name)
+                if os.path.isdir(model_path):
+                    print(f"   - {model_name}")
+        return
+    
+    print(f"✓ Found model directory: {target_model}")
+    print(f"  Path: {model_dir}\n")
+    
+    # Discover all dataset directories
+    dataset_dirs = []
+    for dataset_name in os.listdir(model_dir):
+        dataset_path = os.path.join(model_dir, dataset_name)
+        if os.path.isdir(dataset_path):
+            activation_file = os.path.join(dataset_path, "activations.pkl")
+            if os.path.exists(activation_file):
+                dataset_dirs.append((dataset_name, activation_file))
+    
+    if not dataset_dirs:
+        print(f"❌ No activation files found in {model_dir}")
+        return
+    
+    print(f"✓ Found {len(dataset_dirs)} dataset(s) with activations:")
+    for dataset_name, activation_file in dataset_dirs:
+        print(f"  - {dataset_name}")
+    print()
+    
+    # ============================================================================
+    # LOAD ALL DATASETS
+    # ============================================================================
+    
+    print("="*80)
+    print("LOADING DATASETS")
+    print("="*80)
+    
+    loaded_datasets = []
+    
+    for dataset_name, activation_file in dataset_dirs:
+        print(f"Loading: {dataset_name}...", end=" ")
+        try:
+            data = data_loader(activation_file)
+            loaded_datasets.append((dataset_name, data))
+            print("✓")
+        except Exception as e:
+            print(f"❌ Failed: {e}")
+    
+    if not loaded_datasets:
+        print("\n❌ No datasets loaded successfully!")
+        return
+    
+    print(f"\n✓ Successfully loaded {len(loaded_datasets)} dataset(s)\n")
+    
+    # ============================================================================
+    # OPTIONAL: STRUCTURE OVERVIEW
+    # ============================================================================
+    
+    if loaded_datasets:
+        print("="*80)
+        print("DATASET STRUCTURE OVERVIEW (First Dataset)")
+        print("="*80)
+        #structure_explainer(loaded_datasets[0][1])
+    
+    # ============================================================================
+    # ANALYZE MLP IMPACT
+    # ============================================================================
+    
+    print("\n" + "="*80)
+    print("STARTING MLP IMPACT ANALYSIS")
+    print("="*80)
+    print(f"Analyzing {len(loaded_datasets)} dataset(s):\n")
+    
+    for dataset_name, _ in loaded_datasets:
+        print(f"  • {dataset_name}")
+    print()
+    
+    # Run MLP impact analysis with model name
+    compareMLPImpact(datasets=loaded_datasets, model_name=target_model)
+    
+    # ============================================================================
+    # OPTIONAL: ADDITIONAL ANALYSES
+    # ============================================================================
+    
+    # Uncomment below to run other analyses:
+    
+    # # Compute global means across all datasets
+    # compute_global_means(loaded_datasets, embed="pre_ln2_activations")
+    # print(f"\n✓ Global means computed for {len(global_means)} layers")
+    
+    # # Compare datasets in embedding space
     # print("\n" + "="*80)
     # print("EMBEDDING SPACE COMPARISONS")
     # print("="*80)
+    # compareInEmbedSpaceSummary(datasets=loaded_datasets, embed="pre_ln1_activations")
+    
+    # # Domain consistency analysis (if you have paired datasets)
+    # if len(loaded_datasets) >= 2:
+    #     print("\n" + "="*80)
+    #     print("DOMAIN CONSISTENCY ANALYSIS")
+    #     print("="*80)
+    #     compareDomainConsistency(
+    #         loaded_datasets[0][1], 
+    #         loaded_datasets[1][1], 
+    #         embed="pre_ln2_activations"
+    #     )
 
-    #compareInEmbedSpaceSummary(datasets=normal_datasets, embed = "pre_ln1_activations")
-
-    #compareDomainConsistency(data_gpt_ask1, data_gpt_reply1, embed="pre_ln2_activations")
-
-    # Run for both
-    # result_imc = analyze_representation_structure(data_imc_word, "In-memory computing")
-    # result_pizza = analyze_representation_structure(data_pizzas_word, "Neapolitan pizza")
-    # result_imc2 = analyze_representation_structure(data_imc2_word, "In-memory computing 2")
-    # result_actress = analyze_representation_structure(data_actress_word, "Actress")
-
-    activation_abstract_algebra = "/users/grad/abhishektyagi/wanda/wanda/results/activations/meta-llama_Llama-3.2-3B/custom_abstract_algebra_corpus/activations.pkl"
-    data_abstract_algebra = data_loader(activation_abstract_algebra)
-
-    new_datasets = [
-        ("abstract_algebra", data_abstract_algebra)
-    ]
-
-    compareMLPImpact(datasets=new_datasets)
+def value_check():
 
 if __name__ == '__main__':
-    main()
+    #main()
+    value_check()

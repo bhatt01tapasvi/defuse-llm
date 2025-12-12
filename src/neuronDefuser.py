@@ -10,7 +10,7 @@ PRUNE_DIR = os.path.join(RESULTS_DIR, "pruneNeurons")
 #MAX_FORWARD_PROXY = os.path.join(PRUNING_DIR, "maxProxy")
 
 class NeuronDefuser:
-    def __init__(self, maskingStep: int=0, per_layer_topk: dict=None, ema_decay: float=0.5, ranking_method: str='combined', device: str='cuda'):
+    def __init__(self, maskingStep: int=0, per_layer_topk: dict=None, ema_decay: float=0.5, ranking_method: str='combined', prune_strategy: str='topk', device: str='cuda'):
         """
         Args:
             maskingStep: Step at which to start applying masks
@@ -25,6 +25,7 @@ class NeuronDefuser:
         self.device = device
         self.ema_decay = ema_decay  # Decay factor for EMA
         self.ranking_method = ranking_method
+        self.prune_strategy = prune_strategy  # 'topk' or 'threshold'
 
         # Store the original per_layer_topk config
         self.per_layer_topk_config = per_layer_topk if per_layer_topk is not None else {}
@@ -37,6 +38,7 @@ class NeuronDefuser:
         self.forward_proxies_mean = {}  # Store mean forward proxies per layer
         self.ema_max = {}  # Store EMA per layer
         self.ema_mean = {}  # Store EMA per layer
+        self.ema_activations = {}  # Store EMA of activations per layer
         self.masks = {}  # Store per-layer masks
 
         # Storage for neuron statistics (populated during defuse_neurons)
@@ -101,9 +103,12 @@ class NeuronDefuser:
             return torch.zeros_like(scores)
         return (scores - min_val) / (max_val - min_val)
 
-    def _compute_combined_score(self, max_scores: torch.Tensor, 
+    def _compute_combined_score(self, act_score: torch.Tensor, max_scores: torch.Tensor, 
                                 mean_scores: torch.Tensor) -> torch.Tensor:
-        if self.ranking_method == 'max':
+        if self.ranking_method == 'magnitude':
+            # Use absolute mean scores
+            return act_score
+        elif self.ranking_method == 'max':
             return max_scores
         elif self.ranking_method == 'mean':
             return mean_scores
@@ -153,6 +158,10 @@ class NeuronDefuser:
                                                   device=self.device)
 
             weights = weights / weights.sum()
+            self.ema_activations[layer_name] = torch.sum(
+                torch.abs(activations) * weights.unsqueeze(1), 
+                dim=0
+            )
             self.ema_max[layer_name] = torch.sum(
                 last_gen_forward_proxy_max * weights.unsqueeze(1), 
                 dim=0
@@ -201,12 +210,23 @@ class NeuronDefuser:
             else:
                 # Prune this layer
                 combined_score = self._compute_combined_score(
-                    self.ema_max[layer_name], 
-                    self.ema_mean[layer_name]
+                    act_score=self.ema_activations[layer_name],
+                    max_scores=self.ema_max[layer_name], 
+                    mean_scores=self.ema_mean[layer_name]
                 )
                 
                 # Get top-K neurons based on combined ranking
-                topk_values, topk_indices = torch.topk(combined_score, layer_topk)
+                if self.prune_strategy == 'topk':
+                    topk_values, topk_indices = torch.topk(combined_score, layer_topk)
+                elif self.prune_strategy == 'auto':
+                    threshold = combined_score.mean()
+                    min_val = combined_score.min()
+                    max_val = combined_score.max()
+                    topk_indices = (combined_score >= threshold).nonzero(as_tuple=True)[0]
+                    topk_values = combined_score[topk_indices]
+                    sorted_order = torch.argsort(topk_values, descending=True)
+                    topk_indices = topk_indices[sorted_order]
+                    topk_values = topk_values[sorted_order]
                 
                 # Create mask: keep only top-K neurons
                 mask = torch.zeros(hidden_dim, dtype=torch.float16, device=self.device)
@@ -214,12 +234,20 @@ class NeuronDefuser:
                 self.masks[layer_name] = mask
                 
                 # Store detailed statistics
+                actual_kept = len(topk_indices) if self.prune_strategy == 'auto' else layer_topk
+
                 self.neuron_stats[layer_name] = {
                     'layer_number': layer_num,
                     'total_neurons': hidden_dim,
-                    'neurons_kept': layer_topk,
-                    'neurons_pruned': hidden_dim - layer_topk,
-                    'pruning_percentage': ((hidden_dim - layer_topk) / hidden_dim) * 100,
+                    'neurons_kept': actual_kept,  # Use actual count
+                    'neurons_pruned': hidden_dim - actual_kept,
+                    'pruning_percentage': ((hidden_dim - actual_kept) / hidden_dim) * 100,
+                    'kept_neuron_ids': topk_indices.cpu().tolist(),
+                    'kept_neuron_scores': topk_values.cpu().tolist(),
+                    'prune_strategy': self.prune_strategy,
+                    'threshold': threshold.item() if self.prune_strategy == 'auto' else None,
+                    'min_value': min_val.item() if self.prune_strategy == 'auto' else None,
+                    'max_value': max_val.item() if self.prune_strategy == 'auto' else None
                 }
                 
         # Increment iteration counter
@@ -247,6 +275,8 @@ class NeuronDefuser:
             'layers': {}
         }
 
+        topk_neuron_data = {}
+
         for layer_name, stats in self.neuron_stats.items():
             # Create layer summary without full score arrays
             summary_data['layers'][layer_name] = {
@@ -256,13 +286,24 @@ class NeuronDefuser:
                 'neurons_pruned': stats['neurons_pruned'],
                 'pruning_percentage': stats['pruning_percentage'],
             }
+
+            topk_neuron_data[layer_name] = {
+                'kept_neuron_ids': stats['kept_neuron_ids'],
+                'kept_neuron_scores': stats['kept_neuron_scores']
+            }
         
         # Save summary JSON
         json_file = os.path.join(output_dir, f"{filename_prefix}_summary.json")
         with open(json_file, 'w') as f:
             json.dump(summary_data, f, indent=2)
-        
+
+        # Save topk neuron data separately
+        topk_json_file = os.path.join(output_dir, f"{filename_prefix}_topk_neurons.json")
+        with open(topk_json_file, 'w') as f:
+            json.dump(topk_neuron_data, f, indent=2)
+
         print(f"\n{'='*80}")
         print(f"Neuron ranking results saved:")
         print(f"  Summary: {json_file}")
+        print(f"  Top-K Neurons: {topk_json_file}")
         print(f"{'='*80}\n")

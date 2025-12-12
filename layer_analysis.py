@@ -13,48 +13,25 @@ from datetime import datetime
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = SCRIPT_DIR
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
-ANALYSIS_DIR = os.path.join(RESULTS_DIR, "layer_analysis")
 
-def run_experiment(model, layer_num, keep_rate, masking_step, generation, cache_dir, exp_name, 
+def run_experiment(model, layer_num, keep_rate, masking_step, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir, 
                    prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                    eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                    eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
                    eval_general_nlp, general_nlp_datasets, general_nlp_max_samples,
-                   base_keep_rate=None):
+                   base_keep_rate=None, save_activations=False):
     """
     Run a single pruning experiment for one layer at one keep rate.
-    
-    Args:
-        model: Model name/path
-        layer_num: Layer number to keep
-        keep_rate: Keep rate (proportion of neurons to keep, e.g., 0.25, 0.5, 0.75)
-        masking_step: Step at which to start masking
-        generation: Number of tokens to generate
-        cache_dir: Cache directory for model weights
-        exp_name: Experiment name for organizing results
-        prompt_type: Type of prompt (custom, mmlu)
-        prompt_subject: Subject for prompt
-        prompt_length: Length of prompt in tokens
-        custom_prompt_text: Custom prompt text
-        eval_perplexity: Whether to evaluate perplexity
-        ppl_datasets: Datasets for perplexity evaluation
-        ppl_subjects: Subjects for perplexity evaluation
-        ppl_max_samples: Max samples for perplexity
-        eval_mmlu: Whether to evaluate MMLU
-        mmlu_datasets: MMLU datasets to evaluate
-        mmlu_shots: Number of shots for MMLU
-        mmlu_max_samples: Max samples for MMLU
-        eval_general_nlp: Whether to evaluate general NLP
-        general_nlp_datasets: General NLP datasets
-        general_nlp_max_samples: Max samples for general NLP
-        base_keep_rate: Base keep rate for marginal analysis
     """
-    # Create experiment-specific directory
+    # Create prompt-specific subdirectory
+    prompt_dir = os.path.join(parent_exp_dir, f"{prompt_type}_{prompt_subject}")
+    
+    # Create experiment-specific directory within prompt subdirectory
     if base_keep_rate is not None:
-        exp_dir = os.path.join(ANALYSIS_DIR, exp_name, 
+        exp_dir = os.path.join(prompt_dir, 
                               f"layer_{layer_num}_base_keep_{base_keep_rate}_target_keep_{keep_rate}")
     else:
-        exp_dir = os.path.join(ANALYSIS_DIR, exp_name, f"layer_{layer_num}_keep_{keep_rate}")
+        exp_dir = os.path.join(prompt_dir, f"layer_{layer_num}_keep_{keep_rate}")
     
     os.makedirs(exp_dir, exist_ok=True)
     
@@ -71,11 +48,17 @@ def run_experiment(model, layer_num, keep_rate, masking_step, generation, cache_
         "--cache_dir", cache_dir,
         "--layer_topk", layer_topk,
         "--maskingStep", str(masking_step),
+        "--ranking_method", ranking_method,
+        "--prune_strategy", prune_strategy,
         "--generation", str(generation),
         "--prompt_type", prompt_type,
         "--prompt_subject", prompt_subject,
         "--save_res_dir", exp_dir
     ]
+    
+    # Add save_activations flag
+    if save_activations:
+        cmd.append("--save_activations")
     
     # Add optional prompt arguments
     if prompt_length is not None:
@@ -116,6 +99,7 @@ def run_experiment(model, layer_num, keep_rate, masking_step, generation, cache_
         print(f"  Target keep rate (layer {layer_num}): {keep_rate}")
     else:
         print(f"Running SINGLE LAYER: Layer {layer_num} | Keep Rate: {keep_rate}")
+    print(f"Prompt: {prompt_type}_{prompt_subject}")
     print(f"Layer topk spec: {layer_topk}")
     print(f"Command: {' '.join(cmd)}")
     print(f"Results will be saved to: {exp_dir}")
@@ -130,22 +114,25 @@ def run_experiment(model, layer_num, keep_rate, masking_step, generation, cache_
         print(f"Return code: {e.returncode}")
         return False, exp_dir
 
-def run_group_experiment(model, layer_group, keep_rate, masking_step, generation, cache_dir, exp_name,
+def run_group_experiment(model, layer_group, keep_rate, masking_step, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir,
                         prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                         eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                         eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
                         eval_general_nlp, general_nlp_datasets, general_nlp_max_samples,
-                        base_keep_rate=None):
+                        base_keep_rate=None, save_activations=False):
     """
     Run a pruning experiment for a group of layers at one keep rate.
     """
-    # Create experiment-specific directory
+    # Create prompt-specific subdirectory
+    prompt_dir = os.path.join(parent_exp_dir, f"{prompt_type}_{prompt_subject}")
+    
+    # Create experiment-specific directory within prompt subdirectory
     layer_str = "_".join(map(str, layer_group))
     if base_keep_rate is not None:
-        exp_dir = os.path.join(ANALYSIS_DIR, exp_name, 
+        exp_dir = os.path.join(prompt_dir, 
                               f"group_{layer_str}_base_{base_keep_rate}_target_{keep_rate}")
     else:
-        exp_dir = os.path.join(ANALYSIS_DIR, exp_name, f"group_{layer_str}_keep_{keep_rate}")
+        exp_dir = os.path.join(prompt_dir, f"group_{layer_str}_keep_{keep_rate}")
     
     os.makedirs(exp_dir, exist_ok=True)
     
@@ -166,11 +153,17 @@ def run_group_experiment(model, layer_group, keep_rate, masking_step, generation
         "--cache_dir", cache_dir,
         "--layer_topk", layer_topk,
         "--maskingStep", str(masking_step),
+        "--ranking_method", ranking_method,
+        "--prune_strategy", prune_strategy,
         "--generation", str(generation),
         "--prompt_type", prompt_type,
         "--prompt_subject", prompt_subject,
         "--save_res_dir", exp_dir
     ]
+    
+    # Add save_activations flag
+    if save_activations:
+        cmd.append("--save_activations")
     
     # Add optional prompt arguments
     if prompt_length is not None:
@@ -211,6 +204,7 @@ def run_group_experiment(model, layer_group, keep_rate, masking_step, generation
         print(f"  Target keep rate (layers {layer_group}): {keep_rate}")
     else:
         print(f"Running LAYER GROUP: Layers {layer_group} | Keep Rate: {keep_rate}")
+    print(f"Prompt: {prompt_type}_{prompt_subject}")
     print(f"Layer topk spec: {layer_topk}")
     print(f"Command: {' '.join(cmd)}")
     print(f"Results will be saved to: {exp_dir}")
@@ -225,13 +219,18 @@ def run_group_experiment(model, layer_group, keep_rate, masking_step, generation
         print(f"Return code: {e.returncode}")
         return False, exp_dir
 
-def run_baseline(model, generation, cache_dir, exp_name, 
+def run_baseline(model, generation, cache_dir, parent_exp_dir, 
                 prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                 eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                 eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
-                eval_general_nlp, general_nlp_datasets, general_nlp_max_samples):
+                eval_general_nlp, general_nlp_datasets, general_nlp_max_samples,
+                save_activations=False):
     """Run baseline experiment with no pruning."""
-    exp_dir = os.path.join(ANALYSIS_DIR, exp_name, "baseline")
+    # Create prompt-specific subdirectory
+    prompt_dir = os.path.join(parent_exp_dir, f"{prompt_type}_{prompt_subject}")
+    
+    # Create baseline directory within prompt subdirectory
+    exp_dir = os.path.join(prompt_dir, "baseline")
     os.makedirs(exp_dir, exist_ok=True)
     
     cmd = [
@@ -243,6 +242,10 @@ def run_baseline(model, generation, cache_dir, exp_name,
         "--prompt_subject", prompt_subject,
         "--save_res_dir", exp_dir
     ]
+    
+    # Add save_activations flag
+    if save_activations:
+        cmd.append("--save_activations")
     
     # Add optional prompt arguments
     if prompt_length is not None:
@@ -278,6 +281,8 @@ def run_baseline(model, generation, cache_dir, exp_name,
     
     print(f"\n{'='*80}")
     print(f"Running BASELINE (no pruning)")
+    print(f"Prompt: {prompt_type}_{prompt_subject}")
+    print(f"Results will be saved to: {exp_dir}")
     print(f"{'='*80}\n")
     
     try:
@@ -353,11 +358,13 @@ def main():
                        help='Type of prompt: mmlu, custom')
     parser.add_argument('--prompt_length', type=int, default=None,
                        help='Maximum prompt length in tokens. If None, uses full prompt.')
-    parser.add_argument('--prompt_subject', type=str, default="imc",
-                       help='Prompt subject name: Custom :: imc, imc2, imc3, imc_para, imc2_para, imc_word, '
+    parser.add_argument('--prompt_subject', nargs='+', type=str, default=["imc"],
+                       help='Prompt subject names (can specify multiple). '
+                            'Custom :: imc, imc2, imc3, imc_para, imc2_para, imc_word, '
                             'pizzas, pizzas_para, pizzas_word, actress, actress_para, actress_word, '
-                            'astrophysics, astro_word, maths'
-                            ' | MMLU :: college_computer_science, machine_learning, electrical_engineering, business_ethics, world_religions, prehistory, moral_disputes')
+                            'astrophysics, astro_word, maths '
+                            '| MMLU :: college_computer_science, machine_learning, electrical_engineering, '
+                            'business_ethics, world_religions, prehistory, moral_disputes')
     parser.add_argument('--custom_prompt_text', type=str, default=None,
                        help='Custom prompt text (required if prompt_type=custom and prompt_subject is not specified)')
     
@@ -375,6 +382,10 @@ def main():
                             'then test varying keep rates on one layer at a time.')
     parser.add_argument('--masking_step', type=int, default=100,
                        help='Step at which to start masking')
+    parser.add_argument('--ranking_method', type=str, default='combined',
+                       help='Method to rank neurons for pruning - max, mean, combined, magnitude')
+    parser.add_argument('--prune_strategy', type=str, default='topk',
+                       help='Pruning strategy - topk, auto')
     
     # Layer specification
     parser.add_argument('--layers', type=str, default=None,
@@ -385,8 +396,8 @@ def main():
     # Experiment control
     parser.add_argument('--skip_baseline', action='store_true',
                        help='Skip baseline run')
-    parser.add_argument('--exp_name', type=str, default=None,
-                       help='Experiment name (auto-generated if not specified)')
+    parser.add_argument('--parent_exp_dir', type=str, default=None,
+                       help='Parent experiment directory (auto-generated if not specified)')
     
     # Evaluation: Perplexity
     parser.add_argument('--eval_perplexity', action='store_true', help='Evaluate perplexity on datasets')
@@ -412,6 +423,9 @@ def main():
     parser.add_argument('--general_nlp_max_samples', type=int, default=None, 
                        help='Max samples for general NLP eval')
     
+    # Activation saving
+    parser.add_argument('--save_activations', action='store_true', help='Save activations during model run')
+    
     args = parser.parse_args()
 
     # Auto-detect number of layers if not specified
@@ -430,7 +444,7 @@ def main():
     is_group_mode, specified_layers = parse_layer_specification(args.layers, num_layers)
     
     # Generate experiment name
-    if args.exp_name is None:
+    if args.parent_exp_dir is None:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         if args.base_keep_rate:
             mode = f"marginal_{args.base_keep_rate}"
@@ -438,7 +452,7 @@ def main():
             mode = "single"
         if is_group_mode:
             mode += "_group"
-        args.exp_name = f"{args.model.replace('/', '_')}_{mode}_{timestamp}"
+        args.parent_exp_dir = f"{args.model.replace('/', '_')}_{mode}_{timestamp}"
     
     print(f"\n{'='*80}")
     print(f"LAYER-WISE PRUNING ANALYSIS")
@@ -448,9 +462,11 @@ def main():
     print(f"Mode: {'GROUP' if is_group_mode else 'INDIVIDUAL'}")
     print(f"Keep Rates: {args.keep_rates}")
     print(f"Masking Step: {args.masking_step}")
+    print(f"Ranking Method: {args.ranking_method}")
+    print(f"Prune Strategy: {args.prune_strategy}")
     print(f"Prompt Type: {args.prompt_type}")
     print(f"Prompt Subject: {args.prompt_subject}")
-    print(f"Experiment Name: {args.exp_name}")
+    print(f"Experiment Directory Name: {args.parent_exp_dir}")
     print(f"Evaluations: ", end="")
     evals = []
     if args.eval_perplexity:
@@ -466,12 +482,12 @@ def main():
         print(f"Testing layer groups:")
         for i, group in enumerate(specified_layers):
             print(f"  Group {i+1}: {group}")
-        total_experiments = len(specified_layers) * len(args.keep_rates)
+        total_experiments = len(specified_layers) * len(args.keep_rates) * len(args.prompt_subject)
     else:
         print(f"Testing layers individually: {specified_layers}")
-        total_experiments = len(specified_layers) * len(args.keep_rates)
+        total_experiments = len(specified_layers) * len(args.keep_rates) * len(args.prompt_subject)
     
-    total_experiments += 0 if args.skip_baseline else 1
+    total_experiments += 0 if args.skip_baseline else len(args.prompt_subject)
     print(f"Total experiments: {total_experiments}\n")
     
     # Run baseline
@@ -480,7 +496,7 @@ def main():
             model=args.model,
             generation=args.generation,
             cache_dir=args.cache_dir,
-            exp_name=args.exp_name,
+            parent_exp_dir=args.parent_exp_dir,
             prompt_type=args.prompt_type,
             prompt_subject=args.prompt_subject,
             prompt_length=args.prompt_length,
@@ -495,7 +511,8 @@ def main():
             mmlu_max_samples=args.mmlu_max_samples,
             eval_general_nlp=args.eval_general_nlp,
             general_nlp_datasets=args.general_nlp_datasets,
-            general_nlp_max_samples=args.general_nlp_max_samples
+            general_nlp_max_samples=args.general_nlp_max_samples,
+            save_activations=args.save_activations
         )
         if not success:
             print("WARNING: Baseline experiment failed!")
@@ -504,72 +521,80 @@ def main():
     completed = 0
 
     if is_group_mode:
-        # Group mode: test each group at each keep rate
+        # Group mode: test each group at each keep rate and each prompt subject
         for group_layers in specified_layers:
             for keep_rate in args.keep_rates:
-                success, exp_dir = run_group_experiment(
-                    model=args.model,
-                    layer_group=group_layers,
-                    keep_rate=keep_rate,
-                    masking_step=args.masking_step,
-                    generation=args.generation,
-                    cache_dir=args.cache_dir,
-                    exp_name=args.exp_name,
-                    prompt_type=args.prompt_type,
-                    prompt_subject=args.prompt_subject,
-                    prompt_length=args.prompt_length,
-                    custom_prompt_text=args.custom_prompt_text,
-                    eval_perplexity=args.eval_perplexity,
-                    ppl_datasets=args.ppl_datasets,
-                    ppl_subjects=args.ppl_subjects,
-                    ppl_max_samples=args.ppl_max_samples,
-                    eval_mmlu=args.eval_mmlu,
-                    mmlu_datasets=args.mmlu_datasets,
-                    mmlu_shots=args.mmlu_shots,
-                    mmlu_max_samples=args.mmlu_max_samples,
-                    eval_general_nlp=args.eval_general_nlp,
-                    general_nlp_datasets=args.general_nlp_datasets,
-                    general_nlp_max_samples=args.general_nlp_max_samples,
-                    base_keep_rate=args.base_keep_rate
-                )
-                completed += 1
-                print(f"\nProgress: {completed}/{total_experiments} experiments completed\n")
+                for prompt_subject in args.prompt_subject:
+                    success, exp_dir = run_group_experiment(
+                        model=args.model,
+                        layer_group=group_layers,
+                        keep_rate=keep_rate,
+                        masking_step=args.masking_step,
+                        ranking_method=args.ranking_method,
+                        prune_strategy=args.prune_strategy,
+                        generation=args.generation,
+                        cache_dir=args.cache_dir,
+                        parent_exp_dir=args.parent_exp_dir,
+                        prompt_type=args.prompt_type,
+                        prompt_subject=prompt_subject,
+                        prompt_length=args.prompt_length,
+                        custom_prompt_text=args.custom_prompt_text,
+                        eval_perplexity=args.eval_perplexity,
+                        ppl_datasets=args.ppl_datasets,
+                        ppl_subjects=args.ppl_subjects,
+                        ppl_max_samples=args.ppl_max_samples,
+                        eval_mmlu=args.eval_mmlu,
+                        mmlu_datasets=args.mmlu_datasets,
+                        mmlu_shots=args.mmlu_shots,
+                        mmlu_max_samples=args.mmlu_max_samples,
+                        eval_general_nlp=args.eval_general_nlp,
+                        general_nlp_datasets=args.general_nlp_datasets,
+                        general_nlp_max_samples=args.general_nlp_max_samples,
+                        base_keep_rate=args.base_keep_rate,
+                        save_activations=args.save_activations
+                    )
+                    completed += 1
+                    print(f"\nProgress: {completed}/{total_experiments} experiments completed\n")
     else:
-        # Individual mode: test each layer separately
+        # Individual mode: test each layer separately at each keep rate and each prompt subject
         for layer_num in specified_layers:
             for keep_rate in args.keep_rates:
-                success, exp_dir = run_experiment(
-                    model=args.model,
-                    layer_num=layer_num,
-                    keep_rate=keep_rate,
-                    masking_step=args.masking_step,
-                    generation=args.generation,
-                    cache_dir=args.cache_dir,
-                    exp_name=args.exp_name,
-                    prompt_type=args.prompt_type,
-                    prompt_subject=args.prompt_subject,
-                    prompt_length=args.prompt_length,
-                    custom_prompt_text=args.custom_prompt_text,
-                    eval_perplexity=args.eval_perplexity,
-                    ppl_datasets=args.ppl_datasets,
-                    ppl_subjects=args.ppl_subjects,
-                    ppl_max_samples=args.ppl_max_samples,
-                    eval_mmlu=args.eval_mmlu,
-                    mmlu_datasets=args.mmlu_datasets,
-                    mmlu_shots=args.mmlu_shots,
-                    mmlu_max_samples=args.mmlu_max_samples,
-                    eval_general_nlp=args.eval_general_nlp,
-                    general_nlp_datasets=args.general_nlp_datasets,
-                    general_nlp_max_samples=args.general_nlp_max_samples,
-                    base_keep_rate=args.base_keep_rate
-                )
-                completed += 1
-                print(f"\nProgress: {completed}/{total_experiments} experiments completed\n")
+                for prompt_subject in args.prompt_subject:
+                    success, exp_dir = run_experiment(
+                        model=args.model,
+                        layer_num=layer_num,
+                        keep_rate=keep_rate,
+                        masking_step=args.masking_step,
+                        ranking_method=args.ranking_method,
+                        prune_strategy=args.prune_strategy,
+                        generation=args.generation,
+                        cache_dir=args.cache_dir,
+                        parent_exp_dir=args.parent_exp_dir,
+                        prompt_type=args.prompt_type,
+                        prompt_subject=prompt_subject,
+                        prompt_length=args.prompt_length,
+                        custom_prompt_text=args.custom_prompt_text,
+                        eval_perplexity=args.eval_perplexity,
+                        ppl_datasets=args.ppl_datasets,
+                        ppl_subjects=args.ppl_subjects,
+                        ppl_max_samples=args.ppl_max_samples,
+                        eval_mmlu=args.eval_mmlu,
+                        mmlu_datasets=args.mmlu_datasets,
+                        mmlu_shots=args.mmlu_shots,
+                        mmlu_max_samples=args.mmlu_max_samples,
+                        eval_general_nlp=args.eval_general_nlp,
+                        general_nlp_datasets=args.general_nlp_datasets,
+                        general_nlp_max_samples=args.general_nlp_max_samples,
+                        base_keep_rate=args.base_keep_rate,
+                        save_activations=args.save_activations
+                    )
+                    completed += 1
+                    print(f"\nProgress: {completed}/{total_experiments} experiments completed\n")
 
     print(f"\n{'='*80}")
     print(f"ALL EXPERIMENTS COMPLETED")
     print(f"{'='*80}")
-    print(f"Results saved to: {os.path.join(ANALYSIS_DIR, args.exp_name)}")
+    print(f"Results saved to: {args.parent_exp_dir}")
     print(f"{'='*80}\n")
 
 if __name__ == "__main__":

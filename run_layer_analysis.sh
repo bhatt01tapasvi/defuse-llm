@@ -24,43 +24,48 @@ CACHE_DIR="llm_weights"
 NUM_LAYERS=28              # Leave empty for auto-detection (12 for GPT2, 32 for Llama-3.1-8B)
 
 # Prompt configuration
-PROMPT_TYPE="custom"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="college_computer_science_corpus"           # For custom: "imc", "pizzas", "actress", etc.
-                               # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH=2000                # Leave empty for None (no prompt length limit)
+PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
+#college_computer_science_corpus abstract_algebra_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus
+PROMPT_SUBJECTS="college_computer_science"  # Space-separated list of subjects
+#PROMPT_SUBJECTS="imc_key imc_synonym_key imc_definition imc_definition_v2 imc_definition_v3 imc_synonym imc_technical imc_para imc_layman imc_analogy imc_detail imc_detail_v2 imc_application"  # Space-separated list of subjects
+                               # For custom: "imc pizzas actress", etc.
+                               # For mmlu: "college_computer_science abstract_algebra", etc.
+PROMPT_LENGTH=2000             # Leave empty for None (no prompt length limit)
 CUSTOM_PROMPT_TEXT=""          # Custom text (overrides PROMPT_SUBJECT if set)
 
 # Layer specification
-LAYERS="all"                   # Options: 
+LAYERS="0,1,2,26,27"                   # Options: 
                                #   "all" - test all layers
                                #   "0,1,2,5-8" - individual layers (will test each separately)
                                #   "(0-4),(5-9),(10-14),(15-19),(20-24),(25-27)"   - groups (will test each group)
 
 # Pruning configuration
-KEEP_RATES="0.25 0.5"     # Space-separated keep rates (proportion to KEEP)
-                     # E.g., "0.9 0.7 0.5 0.3 0.1"
+KEEP_RATES="0.25 0.5 0.75"               # Space-separated keep rates (proportion to KEEP)
+                               # E.g., "0.9 0.7 0.5 0.3 0.1"
 BASE_KEEP_RATE=""              # For marginal analysis: base rate for all layers
                                # If set (e.g., "0.5"), will test varying one layer at a time
                                # while keeping others at this rate
-MASKING_STEP=100               # Step at which to start masking
-GENERATION=150                 # Number of tokens to generate
+MASKING_STEP=0                 # Step at which to start masking
+GENERATION=0                   # Number of tokens to generate
+RANKING_METHOD="magnitude"    # Method to rank neurons for pruning - max, mean, combined, product
+PRUNE_STRATEGY="topk"        # Pruning strategy - topk, auto
 
 # Experiment control
-SKIP_BASELINE=true            # Set to true to skip baseline run
+SKIP_BASELINE=true             # Set to true to skip baseline run
 EXPERIMENT_NAME=""             # Leave empty for auto-generated name
+SAVE_ACTIVATIONS=false         # Set to true to save activations during model run
 
 # Evaluation configuration - Perplexity
-EVAL_PERPLEXITY=true          # Set to true to enable perplexity evaluation
-PPL_DATASETS="custom, mmlu"          # Options: "custom", "mmlu" (space-separated)
-PPL_SUBJECTS="abstract_algebra_corpus anne_corpus college_computer_science_corpus food_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"            # Subjects for perplexity evaluation (space-separated)
-#PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"            # Subjects for perplexity evaluation (space-separated)
-PPL_MAX_SAMPLES=200             # Max samples for perplexity eval (leave empty for all)
+EVAL_PERPLEXITY=true           # Set to true to enable perplexity evaluation
+PPL_DATASETS="custom mmlu"     # Options: "custom" "mmlu" (space-separated)
+PPL_SUBJECTS="abstract_algebra_corpus anne_corpus college_computer_science_corpus food_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
+PPL_MAX_SAMPLES=200            # Max samples for perplexity eval (leave empty for all)
 
 # Evaluation configuration - MMLU
 EVAL_MMLU=true                 # Set to true to enable MMLU evaluation
 MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
 MMLU_SHOTS=2                   # Number of few-shot examples
-MMLU_MAX_SAMPLES=200            # Max samples per MMLU task (leave empty for all)
+MMLU_MAX_SAMPLES=200           # Max samples per MMLU task (leave empty for all)
 
 # Evaluation configuration - General NLP
 EVAL_GENERAL_NLP=false         # Set to true to enable general NLP evaluation
@@ -68,7 +73,7 @@ GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_ea
 GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/layer_analysis"
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/ranking_study"
 
 # ============================================================================
 # SETUP
@@ -79,6 +84,7 @@ mkdir -p "$BASE_RESULTS_DIR"
 
 # Generate timestamp
 TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+SIGNATURE="rank_magnitude_auto"
 START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
 START_EPOCH=$(date +%s)
 
@@ -94,7 +100,8 @@ if [ -z "$EXPERIMENT_NAME" ]; then
     if [[ "$LAYERS" == *"("* ]] && [[ "$LAYERS" == *")"* ]]; then
         MODE="${MODE}_group"
     fi
-    EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${PROMPT_SUBJECT}_${MODE}_${TIMESTAMP}"
+    #EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${MODE}_${TIMESTAMP}"
+    EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${MODE}_${SIGNATURE}"
 fi
 
 RESULTS_DIR="${BASE_RESULTS_DIR}/${EXPERIMENT_NAME}"
@@ -126,16 +133,19 @@ print_config() {
     echo "  Keep Rates: $KEEP_RATES"
     echo "  Base Keep Rate: ${BASE_KEEP_RATE:-None (single layer mode)}"
     echo "  Masking Step: $MASKING_STEP"
+    echo " Ranking Method: $RANKING_METHOD"
+    echo " Prune Strategy: $PRUNE_STRATEGY"
     echo "  Skip Baseline: $SKIP_BASELINE"
     echo ""
     echo "Prompt Configuration:"
     echo "  Type: $PROMPT_TYPE"
-    echo "  Subject: $PROMPT_SUBJECT"
+    echo "  Subjects: $PROMPT_SUBJECTS"
     echo "  Length: ${PROMPT_LENGTH:-None}"
     if [ -n "$CUSTOM_PROMPT_TEXT" ]; then
         echo "  Custom Text: ${CUSTOM_PROMPT_TEXT:0:50}..."
     fi
     echo "  Generation Tokens: $GENERATION"
+    echo "  Save Activations: $SAVE_ACTIVATIONS"
     echo ""
     echo "Evaluation Settings:"
     echo "  Perplexity: $EVAL_PERPLEXITY"
@@ -201,7 +211,7 @@ cat > "$CONFIG_LOG" << EOF
   "num_layers": $NUM_LAYERS_JSON,
   "prompt": {
     "type": "$PROMPT_TYPE",
-    "subject": "$PROMPT_SUBJECT",
+    "subjects": "$PROMPT_SUBJECTS",
     "length": $PROMPT_LENGTH_JSON,
     "custom_text": $CUSTOM_PROMPT_TEXT_JSON
   },
@@ -210,8 +220,11 @@ cat > "$CONFIG_LOG" << EOF
     "keep_rates": "$KEEP_RATES",
     "base_keep_rate": $BASE_KEEP_RATE_JSON,
     "masking_step": $MASKING_STEP,
+    "ranking_method": "$RANKING_METHOD",
+    "prune_strategy": "$PRUNE_STRATEGY",
     "generation": $GENERATION,
-    "skip_baseline": $SKIP_BASELINE
+    "skip_baseline": $SKIP_BASELINE,
+    "save_activations": $SAVE_ACTIVATIONS
   },
   "evaluation": {
     "perplexity": {
@@ -248,9 +261,11 @@ CMD="CUDA_VISIBLE_DEVICES=$DEVICE stdbuf -oL -eL python -u layer_analysis.py \
     --layers \"$LAYERS\" \
     --keep_rates $KEEP_RATES \
     --masking_step $MASKING_STEP \
+    --ranking_method \"$RANKING_METHOD\" \
+    --prune_strategy \"$PRUNE_STRATEGY\" \
     --generation $GENERATION \
     --prompt_type \"$PROMPT_TYPE\" \
-    --prompt_subject \"$PROMPT_SUBJECT\""
+    --prompt_subject $PROMPT_SUBJECTS"
 
 # Add optional arguments
 if [ -n "$NUM_LAYERS" ]; then
@@ -278,9 +293,14 @@ if [ "$SKIP_BASELINE" = true ]; then
     --skip_baseline"
 fi
 
-if [ -n "$EXPERIMENT_NAME" ]; then
+if [ "$SAVE_ACTIVATIONS" = true ]; then
     CMD="$CMD \
-    --exp_name \"$EXPERIMENT_NAME\""
+    --save_activations"
+fi
+
+if [ -n "$RESULTS_DIR" ]; then
+    CMD="$CMD \
+    --parent_exp_dir \"$RESULTS_DIR\""
 fi
 
 # Add perplexity evaluation flags
