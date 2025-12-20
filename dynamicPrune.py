@@ -104,13 +104,17 @@ def parse_layer_topk(layer_spec: str, num_layers: int, intermediate_size: int) -
         
         # Parse the value (either percentage or absolute number)
         try:
-            value = float(value_part)
-            if 0 < value <= 1:
-                # It's a percentage
-                topk_value = int(value * intermediate_size)
+            # NEW: Check for "auto" keyword
+            if value_part.lower() == "auto":
+                topk_value = -2  # Sentinel for auto
             else:
-                # It's an absolute number
-                topk_value = int(value)
+                value = float(value_part)
+                if 0 < value <= 1:
+                    # It's a percentage
+                    topk_value = int(value * intermediate_size)
+                else:
+                    # It's an absolute number
+                    topk_value = int(value)
         except ValueError:
             raise ValueError(f"Invalid value: {value_part}. Must be a number.")
         
@@ -347,6 +351,7 @@ def main():
                             '"0-5:0.6" (60%% to layers 0-5), '
                             '"0-5:0.6,6-11:0.8" (mixed ranges)')
     parser.add_argument('--maskingStep', type=int, default=None, help='Step at which to start masking neurons')
+    parser.add_argument('--ema_decay', type=float, default=None, help='Decay factor for EMA (0.0 to 1.0)')
     parser.add_argument('--ranking_method', type=str, default="combined", 
                    help='Method to rank neurons for pruning - max, mean, combined, product, magnitude')
     parser.add_argument('--prune_strategy', type=str, default="topk", help='Pruning strategy - topk, automatic configure threshold as mean')
@@ -448,6 +453,7 @@ def main():
     neuronDefuser = NeuronDefuser(
         maskingStep=args.maskingStep, 
         per_layer_topk=per_layer_config,
+        ema_decay=args.ema_decay,
         ranking_method=args.ranking_method,
         prune_strategy=args.prune_strategy,
         device=device
@@ -535,8 +541,9 @@ def main():
                 'post_mlp2_activations': post_mlp2_activations,
                 'post_layer_activations': post_layer_activations,
                 'mlp2_weights': mlp2_weights,
+                'embedding_weights': embedding_weights,
                 'mlp2_forward_proxy': mlp2_forward_proxy,
-                'model_type': model_type
+                #'model_type': model_type
             }, f)
         print(f"Activations saved to {save_path}")
     

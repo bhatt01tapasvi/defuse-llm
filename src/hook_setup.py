@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 import gc
 
 def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activations, 
@@ -144,6 +143,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 post_attn_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "mlp_down" in sublayer_name:
                 post_mlp2_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
+                neuronDefuser.calculate_mlp_impact(layer_name, activation_magnitude.detach().cpu().numpy())
             elif "layer" in sublayer_name:
                 post_layer_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
         return hook_fn
@@ -193,6 +193,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 pre_ln1_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "post_attention_layernorm" in sublayer_name:
                 pre_ln2_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
+                neuronDefuser.cache_pre_mlp(layer_name, activation_magnitude.detach().cpu().numpy())
             elif "self_attn" in sublayer_name:
                 pre_attn_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "mlp_gate" in sublayer_name:

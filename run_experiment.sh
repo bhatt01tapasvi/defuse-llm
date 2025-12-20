@@ -23,7 +23,7 @@ CACHE_DIR="llm_weights"
 
 # Prompt configuration
 PROMPT_TYPE="custom"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="imc_key"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_SUBJECT="imc_definition"           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
 PROMPT_LENGTH=2000               # Leave empty for None (no prompt length limit)
 
@@ -32,11 +32,17 @@ PROMPT_LENGTH=2000               # Leave empty for None (no prompt length limit)
 ##LAYER_TOPK="10:0.5,11:0.5,12:0.5,13:0.5,14:0.5,15:0.5,16:0.5,17:0.5,18:0.5,19:0.5,20:0.5"
 ##MASKING_STEP=100
 ##GENERATION=150
+##EMA_DECAY=0.5
+##RANKING_METHOD="combined"
+##PRUNE_STRATEGY="topk"
 
 ## Comment these out when pruning.
 LAYER_TOPK=""
 MASKING_STEP=""
 GENERATION=0
+EMA_DECAY="0.5"                    # Decay factor for EMA (0.0 to 1.0, leave empty for None/L2 norm)
+RANKING_METHOD="max"        # Method to rank neurons - max, mean, combined, product, magnitude
+PRUNE_STRATEGY="auto"           # Pruning strategy - topk, auto
 
 # Activation saving configuration
 SAVE_ACTIVATIONS=true       # Set to true to save activations (uses more memory)
@@ -65,7 +71,7 @@ GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty f
 
 # Results directory
 EXPERIMENT_NAME=${PROMPT_TYPE}_${PROMPT_SUBJECT}
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/activations"
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/activations/neuron_score"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
@@ -101,8 +107,11 @@ print_config() {
     echo "Prompt Type: $PROMPT_TYPE"
     echo "Prompt Subject: $PROMPT_SUBJECT"
     echo "Prompt Length: ${PROMPT_LENGTH:-None}"
-    echo "Layer TopK: $LAYER_TOPK"
-    echo "Masking Step: $MASKING_STEP"
+    echo "Layer TopK: ${LAYER_TOPK:-None}"
+    echo "Masking Step: ${MASKING_STEP:-None}"
+    echo "EMA Decay: ${EMA_DECAY:-None (L2 norm)}"
+    echo "Ranking Method: $RANKING_METHOD"
+    echo "Prune Strategy: $PRUNE_STRATEGY"
     echo "Generation Tokens: $GENERATION"
     echo "Save Activations: $SAVE_ACTIVATIONS"
     echo ""
@@ -176,6 +185,12 @@ else
     MASKING_STEP_JSON="$MASKING_STEP"
 fi
 
+if [ -z "$EMA_DECAY" ]; then
+    EMA_DECAY_JSON="null"
+else
+    EMA_DECAY_JSON="$EMA_DECAY"
+fi
+
 cat > "$CONFIG_LOG" << EOF
 {
   "experiment_name": "$EXPERIMENT_NAME",
@@ -192,6 +207,9 @@ cat > "$CONFIG_LOG" << EOF
   "pruning": {
     "layer_topk": $LAYER_TOPK_JSON,
     "masking_step": $MASKING_STEP_JSON,
+    "ema_decay": $EMA_DECAY_JSON,
+    "ranking_method": "$RANKING_METHOD",
+    "prune_strategy": "$PRUNE_STRATEGY",
     "generation": $GENERATION
   },
   "evaluation": {
@@ -252,6 +270,20 @@ if [ -n "$MASKING_STEP" ]; then
     CMD="$CMD \
     --maskingStep $MASKING_STEP"
 fi
+
+# Add ema_decay only if set
+if [ -n "$EMA_DECAY" ]; then
+    CMD="$CMD \
+    --ema_decay $EMA_DECAY"
+fi
+
+# Add ranking_method
+CMD="$CMD \
+    --ranking_method \"$RANKING_METHOD\""
+
+# Add prune_strategy
+CMD="$CMD \
+    --prune_strategy \"$PRUNE_STRATEGY\""
 
 # Always add generation (assuming it's required)
 CMD="$CMD \

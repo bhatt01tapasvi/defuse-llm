@@ -14,7 +14,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = SCRIPT_DIR
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
-def run_experiment(model, layer_num, keep_rate, masking_step, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir, 
+def run_experiment(model, layer_num, keep_rate, masking_step, ema_decay, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir, 
                    prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                    eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                    eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
@@ -56,9 +56,9 @@ def run_experiment(model, layer_num, keep_rate, masking_step, ranking_method, pr
         "--save_res_dir", exp_dir
     ]
     
-    # Add save_activations flag
-    if save_activations:
-        cmd.append("--save_activations")
+    # Add ema_decay if specified
+    if ema_decay is not None:
+        cmd.extend(["--ema_decay", str(ema_decay)])
     
     # Add optional prompt arguments
     if prompt_length is not None:
@@ -114,7 +114,7 @@ def run_experiment(model, layer_num, keep_rate, masking_step, ranking_method, pr
         print(f"Return code: {e.returncode}")
         return False, exp_dir
 
-def run_group_experiment(model, layer_group, keep_rate, masking_step, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir,
+def run_group_experiment(model, layer_group, keep_rate, masking_step, ema_decay, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir,
                         prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                         eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                         eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
@@ -161,9 +161,9 @@ def run_group_experiment(model, layer_group, keep_rate, masking_step, ranking_me
         "--save_res_dir", exp_dir
     ]
     
-    # Add save_activations flag
-    if save_activations:
-        cmd.append("--save_activations")
+    # Add ema_decay if specified
+    if ema_decay is not None:
+        cmd.extend(["--ema_decay", str(ema_decay)])
     
     # Add optional prompt arguments
     if prompt_length is not None:
@@ -382,6 +382,8 @@ def main():
                             'then test varying keep rates on one layer at a time.')
     parser.add_argument('--masking_step', type=int, default=100,
                        help='Step at which to start masking')
+    parser.add_argument('--ema_decay', type=float, default=None,
+                       help='Decay factor for EMA (0.0 to 1.0). If None, uses L2 norm aggregation')
     parser.add_argument('--ranking_method', type=str, default='combined',
                        help='Method to rank neurons for pruning - max, mean, combined, magnitude')
     parser.add_argument('--prune_strategy', type=str, default='topk',
@@ -462,6 +464,7 @@ def main():
     print(f"Mode: {'GROUP' if is_group_mode else 'INDIVIDUAL'}")
     print(f"Keep Rates: {args.keep_rates}")
     print(f"Masking Step: {args.masking_step}")
+    print(f"EMA Decay: {args.ema_decay if args.ema_decay is not None else 'None (L2 norm)'}")
     print(f"Ranking Method: {args.ranking_method}")
     print(f"Prune Strategy: {args.prune_strategy}")
     print(f"Prompt Type: {args.prompt_type}")
@@ -530,6 +533,7 @@ def main():
                         layer_group=group_layers,
                         keep_rate=keep_rate,
                         masking_step=args.masking_step,
+                        ema_decay=args.ema_decay,
                         ranking_method=args.ranking_method,
                         prune_strategy=args.prune_strategy,
                         generation=args.generation,
@@ -565,6 +569,7 @@ def main():
                         layer_num=layer_num,
                         keep_rate=keep_rate,
                         masking_step=args.masking_step,
+                        ema_decay=args.ema_decay,
                         ranking_method=args.ranking_method,
                         prune_strategy=args.prune_strategy,
                         generation=args.generation,

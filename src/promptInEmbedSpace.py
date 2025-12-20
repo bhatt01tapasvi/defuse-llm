@@ -7,6 +7,7 @@ import numpy as np
 from util import data_loader
 from scipy.spatial.distance import cosine
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # Global path configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -510,6 +511,233 @@ def structure_explainer(data: dict[str, Any]=None):
         layer_names = list(activation_dict.keys())[:3]
         print(f"  Sample layer names: {layer_names}{'...' if len(activation_dict) > 3 else ''}")
 
+def analyze_weight_activation_distributions(data: dict, save_dir: str = None):
+    """
+    Analyze and visualize the distribution of weights vs activations.
+    
+    Structure:
+    - mlp2_weights[layer]: list of 3072 arrays, each of shape (8192,)
+      → These are the weight COLUMNS (one per output neuron)
+    - pre_mlp2_activations[layer]: list with 1 array of shape (1, 4, 8192)
+      → These are the neuron activations (batch, tokens, neurons)
+    """
+    
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+    
+    print("\n" + "="*80)
+    print("WEIGHT vs ACTIVATION DISTRIBUTION ANALYSIS")
+    print("="*80)
+    
+    mlp2_weights = data['mlp2_weights']
+    pre_mlp2_activations = data['pre_mlp2_activations']
+    
+    # Choose a few representative layers to analyze
+    all_layers = list(mlp2_weights.keys())
+    # Analyze first, middle, and last layers
+    layers_to_analyze = [
+        all_layers[0],           # First layer
+        all_layers[len(all_layers)//2],  # Middle layer
+        all_layers[-1]           # Last layer
+    ]
+    
+    print(f"\nAnalyzing {len(layers_to_analyze)} representative layers:")
+    for layer in layers_to_analyze:
+        print(f"  • {layer}")
+    print()
+    
+    summary_data = []
+    
+    for layer_idx, layer_name in enumerate(layers_to_analyze):
+        print(f"\n{'='*60}")
+        print(f"Layer: {layer_name}")
+        print(f"{'='*60}")
+        
+        # ====================================================================
+        # EXTRACT WEIGHTS
+        # ====================================================================
+        # mlp2_weights[layer] is a list of 3072 arrays, each shape (8192,)
+        # This represents the weight matrix columns (input_dim=8192, output_dim=3072)
+        weights_list = mlp2_weights[layer_name]
+        
+        # Stack to get full weight matrix: (output_neurons=3072, input_neurons=8192)
+        weights_matrix = np.stack(weights_list, axis=0)  # Shape: (3072, 8192)
+        
+        # Flatten all weights for distribution analysis
+        all_weights = weights_matrix.flatten()
+        
+        print(f"\nWeights:")
+        print(f"  Shape: {weights_matrix.shape} (output_neurons, input_neurons)")
+        print(f"  Total elements: {all_weights.size:,}")
+        print(f"  Mean: {np.mean(all_weights):.6f}")
+        print(f"  Std: {np.std(all_weights):.6f}")
+        print(f"  Min: {np.min(all_weights):.6f}")
+        print(f"  Max: {np.max(all_weights):.6f}")
+        print(f"  Median: {np.median(all_weights):.6f}")
+        print(f"  25th percentile: {np.percentile(all_weights, 25):.6f}")
+        print(f"  75th percentile: {np.percentile(all_weights, 75):.6f}")
+        
+        # ====================================================================
+        # EXTRACT ACTIVATIONS
+        # ====================================================================
+        # pre_mlp2_activations[layer] is a list with 1 element of shape (1, 4, 8192)
+        # → (batch_size=1, num_tokens=4, num_neurons=8192)
+        activations_list = pre_mlp2_activations[layer_name]
+        activations_array = activations_list[0]  # Shape: (1, 4, 8192)
+        
+        # Remove batch dimension and flatten
+        activations_array = activations_array.squeeze(0)  # Shape: (4, 8192)
+        all_activations = activations_array.flatten()
+        
+        print(f"\nActivations:")
+        print(f"  Shape: {activations_array.shape} (num_tokens, num_neurons)")
+        print(f"  Total elements: {all_activations.size:,}")
+        print(f"  Mean: {np.mean(all_activations):.6f}")
+        print(f"  Std: {np.std(all_activations):.6f}")
+        print(f"  Min: {np.min(all_activations):.6f}")
+        print(f"  Max: {np.max(all_activations):.6f}")
+        print(f"  Median: {np.median(all_activations):.6f}")
+        print(f"  25th percentile: {np.percentile(all_activations, 25):.6f}")
+        print(f"  75th percentile: {np.percentile(all_activations, 75):.6f}")
+        
+        # ====================================================================
+        # COMPUTE SCALE RATIOS
+        # ====================================================================
+        weight_scale = np.std(all_weights)
+        activation_scale = np.std(all_activations)
+        scale_ratio = activation_scale / (weight_scale + 1e-12)
+        
+        weight_magnitude = np.mean(np.abs(all_weights))
+        activation_magnitude = np.mean(np.abs(all_activations))
+        magnitude_ratio = activation_magnitude / (weight_magnitude + 1e-12)
+        
+        print(f"\nScale Comparison:")
+        print(f"  Weight std / Activation std: {1/scale_ratio:.4f} : 1")
+        print(f"  Activation std / Weight std: {scale_ratio:.4f} : 1")
+        print(f"  Mean |weight| / Mean |activation|: {1/magnitude_ratio:.4f} : 1")
+        print(f"  Mean |activation| / Mean |weight|: {magnitude_ratio:.4f} : 1")
+        
+        # ====================================================================
+        # SAMPLE VALUES FOR INSPECTION
+        # ====================================================================
+        print(f"\nSample Values (first 10):")
+        print(f"  Weights:     {all_weights[:10]}")
+        print(f"  Activations: {all_activations[:10]}")
+        
+        # ====================================================================
+        # STORE SUMMARY DATA
+        # ====================================================================
+        summary_data.append({
+            'Layer': layer_name,
+            'Weight Mean': np.mean(all_weights),
+            'Weight Std': np.std(all_weights),
+            'Weight Min': np.min(all_weights),
+            'Weight Max': np.max(all_weights),
+            'Activation Mean': np.mean(all_activations),
+            'Activation Std': np.std(all_activations),
+            'Activation Min': np.min(all_activations),
+            'Activation Max': np.max(all_activations),
+            'Scale Ratio (Act/Weight)': scale_ratio,
+            'Magnitude Ratio (Act/Weight)': magnitude_ratio
+        })
+        
+        # ====================================================================
+        # VISUALIZATION
+        # ====================================================================
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(f'{layer_name} - Weight vs Activation Distributions', 
+                     fontsize=14, fontweight='bold')
+        
+        # 1. Histogram comparison
+        ax1 = axes[0, 0]
+        ax1.hist(all_weights, bins=100, alpha=0.6, label='Weights', 
+                 density=True, color='blue', edgecolor='black')
+        ax1.hist(all_activations, bins=100, alpha=0.6, label='Activations', 
+                 density=True, color='red', edgecolor='black')
+        ax1.set_xlabel('Value')
+        ax1.set_ylabel('Density')
+        ax1.set_title('Distribution Comparison (Full Range)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Log-scale histogram for better visibility
+        ax2 = axes[0, 1]
+        ax2.hist(all_weights, bins=100, alpha=0.6, label='Weights', 
+                 density=True, color='blue', edgecolor='black')
+        ax2.hist(all_activations, bins=100, alpha=0.6, label='Activations', 
+                 density=True, color='red', edgecolor='black')
+        ax2.set_xlabel('Value')
+        ax2.set_ylabel('Density (log scale)')
+        ax2.set_yscale('log')
+        ax2.set_title('Distribution Comparison (Log Scale)')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Box plot comparison
+        ax3 = axes[1, 0]
+        bp = ax3.boxplot([all_weights, all_activations], 
+                         labels=['Weights', 'Activations'],
+                         patch_artist=True,
+                         showfliers=False)  # Hide outliers for clarity
+        bp['boxes'][0].set_facecolor('blue')
+        bp['boxes'][1].set_facecolor('red')
+        ax3.set_ylabel('Value')
+        ax3.set_title('Box Plot Comparison (outliers hidden)')
+        ax3.grid(True, alpha=0.3, axis='y')
+        
+        # 4. Q-Q plot style comparison of percentiles
+        ax4 = axes[1, 1]
+        percentiles = np.linspace(0, 100, 101)
+        weight_percentiles = np.percentile(all_weights, percentiles)
+        activation_percentiles = np.percentile(all_activations, percentiles)
+        ax4.scatter(weight_percentiles, activation_percentiles, 
+                   alpha=0.5, s=20, color='purple')
+        
+        # Add diagonal line for reference
+        min_val = min(weight_percentiles.min(), activation_percentiles.min())
+        max_val = max(weight_percentiles.max(), activation_percentiles.max())
+        ax4.plot([min_val, max_val], [min_val, max_val], 
+                'k--', alpha=0.5, label='y=x (same distribution)')
+        
+        ax4.set_xlabel('Weight Percentiles')
+        ax4.set_ylabel('Activation Percentiles')
+        ax4.set_title('Percentile-Percentile Plot')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_dir:
+            plot_path = os.path.join(save_dir, f'{layer_name}_distribution.png')
+            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+            print(f"\n✓ Plot saved: {plot_path}")
+        
+        plt.show()
+        plt.close()
+    
+    # ====================================================================
+    # CREATE SUMMARY TABLE
+    # ====================================================================
+    print("\n" + "="*80)
+    print("SUMMARY TABLE")
+    print("="*80)
+    
+    df = pd.DataFrame(summary_data)
+    
+    # Format for display
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', None)
+    pd.set_option('display.float_format', '{:.6f}'.format)
+    
+    print(df.to_string(index=False))
+    
+    if save_dir:
+        csv_path = os.path.join(save_dir, 'weight_activation_summary.csv')
+        df.to_csv(csv_path, index=False)
+        print(f"\n✓ Summary saved: {csv_path}")
+    
+    return df
+
 def main():
     # ============================================================================
     # AUTO-DISCOVER ACTIVATION FILES
@@ -635,8 +863,36 @@ def main():
     #         embed="pre_ln2_activations"
     #     )
 
-def value_check():
+def main_v2():
+    # Load data
+    activation_file = os.path.join(
+        RESULTS_DIR, 
+        "activations", 
+        "meta-llama_Llama-3.2-3B", 
+        "custom_imc_key", 
+        "activations.pkl"
+    )
+    
+    if not os.path.exists(activation_file):
+        print(f"❌ File not found: {activation_file}")
+        return
+    
+    print(f"Loading data from: {activation_file}")
+    data = data_loader(activation_file)
+    print("✓ Data loaded successfully\n")
+    
+    # Create output directory
+    output_dir = os.path.join(RESULTS_DIR, "weight_activation_analysis")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Run analysis
+    summary_df = analyze_weight_activation_distributions(data, save_dir=output_dir)
+    
+    print("\n" + "="*80)
+    print("ANALYSIS COMPLETE")
+    print("="*80)
+    print(f"Results saved to: {output_dir}")
+
 
 if __name__ == '__main__':
-    #main()
-    value_check()
+    main_v2()
