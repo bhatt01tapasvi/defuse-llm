@@ -110,6 +110,13 @@ class NeuronDefuser:
 
     def _compute_combined_score(self, act_score: torch.Tensor, max_scores: torch.Tensor, 
                                 mean_scores: torch.Tensor) -> torch.Tensor:
+        # If using L2 norm (ema_decay is None), the scores are sum of squares
+        # Take sqrt to get actual L2 norm
+        if self.ema_decay is None:
+            act_score = torch.sqrt(act_score)
+            max_scores = torch.sqrt(max_scores)
+            mean_scores = torch.sqrt(mean_scores)
+        
         if self.ranking_method == 'magnitude':
             # Use absolute mean scores
             return act_score
@@ -162,15 +169,16 @@ class NeuronDefuser:
 
             # Check if ema_decay is None (use L2 norm aggregation)
             if self.ema_decay is None:
-                # L2 norm: sqrt(sum of squares) for each neuron
-                self.ema_activations[layer_name] = torch.sqrt(
-                    torch.sum(torch.abs(activations) ** 2, dim=0)
+                # L2 norm: Store sum of squares (not sqrt yet) so we can accumulate properly
+                # We'll take sqrt only when computing final scores
+                self.ema_activations[layer_name] = torch.sum(
+                    torch.abs(activations) ** 2, dim=0
                 )
-                self.ema_max[layer_name] = torch.sqrt(
-                    torch.sum(last_gen_forward_proxy_max ** 2, dim=0)
+                self.ema_max[layer_name] = torch.sum(
+                    last_gen_forward_proxy_max ** 2, dim=0
                 )
-                self.ema_mean[layer_name] = torch.sqrt(
-                    torch.sum(last_gen_forward_proxy_mean ** 2, dim=0)
+                self.ema_mean[layer_name] = torch.sum(
+                    last_gen_forward_proxy_mean ** 2, dim=0
                 )
             else:
                 # Apply exponential weighting
@@ -192,26 +200,39 @@ class NeuronDefuser:
                     dim=0
                 )
 
-        elif self.currIteration <= self.maskingStep: # When currIter == maskingStep, we make the final update and mask, then don't compute ema again.
+        elif self.currIteration < self.maskingStep: # When currIter == maskingStep, we make the final update and mask, then don't compute ema again.
             # Multiply activations with proxy values (broadcasting)
-            last_gen_forward_proxy_max = torch.abs(activations[-1]) * self.forward_proxies_max[layer_name]  # Shape: (num_tokens, embed_dim)
+            last_gen_forward_proxy_max = torch.abs(activations[-1]) * self.forward_proxies_max[layer_name]  # Shape: (embed_dim,)
             last_gen_forward_proxy_mean = torch.abs(activations[-1]) * self.forward_proxies_mean[layer_name]
+            last_gen_activations = torch.abs(activations[-1])
             
             # Check if ema_decay is None (use L2 norm accumulation)
             if self.ema_decay is None:
-                # L2 norm accumulation: sqrt(sum_old^2 + new_value^2)
-                # This is equivalent to: new_l2 = sqrt(old_l2^2 + new^2)
-                self.ema_max[layer_name] = torch.sqrt(
-                    self.ema_max[layer_name] ** 2 + last_gen_forward_proxy_max ** 2
+                # L2 norm accumulation: add new squared values to sum of squares
+                # sum_of_squares_new = sum_of_squares_old + new_value^2
+                self.ema_activations[layer_name] = (
+                    self.ema_activations[layer_name] + last_gen_activations ** 2
                 )
-                self.ema_mean[layer_name] = torch.sqrt(
-                    self.ema_mean[layer_name] ** 2 + last_gen_forward_proxy_mean ** 2
+                self.ema_max[layer_name] = (
+                    self.ema_max[layer_name] + last_gen_forward_proxy_max ** 2
+                )
+                self.ema_mean[layer_name] = (
+                    self.ema_mean[layer_name] + last_gen_forward_proxy_mean ** 2
                 )
             else:
                 # Update EMA: ema_new = decay * ema_old + (1 - decay) * new_value
-                print(f"FIX ME PLS")
-                self.ema_max[layer_name] = self.ema_decay * self.ema_max[layer_name] + last_gen_forward_proxy_max
-                self.ema_mean[layer_name] = self.ema_decay * self.ema_mean[layer_name] + last_gen_forward_proxy_mean
+                self.ema_activations[layer_name] = (
+                    self.ema_decay * self.ema_activations[layer_name] + 
+                    (1 - self.ema_decay) * last_gen_activations
+                )
+                self.ema_max[layer_name] = (
+                    self.ema_decay * self.ema_max[layer_name] + 
+                    (1 - self.ema_decay) * last_gen_forward_proxy_max
+                )
+                self.ema_mean[layer_name] = (
+                    self.ema_decay * self.ema_mean[layer_name] + 
+                    (1 - self.ema_decay) * last_gen_forward_proxy_mean
+                )
 
         is_last_layer = (layer_name == list(self.forward_proxies_max.keys())[-1])
         
@@ -220,12 +241,31 @@ class NeuronDefuser:
             if is_last_layer:
                 self.currIteration += 1
             return activations3
+        
         elif self.currIteration == self.maskingStep:
             layer_topk = self.per_layer_topk.get(layer_name, -1)  # Get configured value
             layer_num = self.layer_name_to_number.get(layer_name, -1)
     
             # Check if this layer should be pruned
             if layer_topk == -2:  # AUTO_TOPK_SENTINEL
+                # Check if we have sufficient MLP impact history for all layers
+                num_registered_layers = len(self.per_layer_topk)
+                num_layers_with_history = len(self.mlp_impact_history)
+                
+                ## SAFETY HARNESS ##
+                if num_layers_with_history < num_registered_layers:
+                    print(f"WARNING: Insufficient MLP impact history for adaptive pruning.")
+                    print(f"  Registered layers: {num_registered_layers}, History available: {num_layers_with_history}")
+                    print(f"  Deferring masking to next iteration (currIter={self.currIteration}, maskingStep={self.maskingStep})...")
+                    
+                    # Increment maskingStep so we try again next iteration
+                    if is_last_layer:
+                        self.maskingStep += 1
+                        self.currIteration += 1
+                        print(f"  Updated maskingStep to {self.maskingStep}, currIteration to {self.currIteration}")
+                    return activations3
+                ## END SAFETY HARNESS ##
+                
                 layer_topk = self.compute_adaptive_topk(layer_name=layer_name, hidden_dim=hidden_dim, total_prune_percent=50.0)
                 print(f"Auto-calculated topk for layer {layer_num}: {layer_topk}")
             else:
@@ -299,6 +339,7 @@ class NeuronDefuser:
         """Called by post_attention_layernorm hook"""
         if self.currIteration > self.maskingStep:
             return
+        print(f"Caching pre-MLP activations for layer {layer_name} and activation value {activation.shape}")
         self.pre_mlp_cache[layer_name] = activation
 
     def calculate_mlp_impact(self, layer_name, post_mlp_activation):
@@ -315,7 +356,7 @@ class NeuronDefuser:
         pre_mlp = self.pre_mlp_cache[layer_name]
         post_mlp = post_mlp_activation
         
-        cosine = cosine_similarity(pre_mlp, post_mlp)
+        cosine_value = cosine_similarity(pre_mlp, post_mlp)
         pre = np.asarray(pre_mlp, dtype=np.float64)
         post = np.asarray(post_mlp, dtype=np.float64)
         if pre.ndim != post.ndim:
@@ -342,10 +383,10 @@ class NeuronDefuser:
             raise ValueError("relative_mlp_impact supports only 1D or 2D inputs")
 
         # If scalar (1D inputs), append single value; if array (2D inputs), extend per token
-        if np.isscalar(cosine):
-            self.mlp_impact_history[layer_name]['cosine'].append(float(cosine))
+        if np.isscalar(cosine_value):
+            self.mlp_impact_history[layer_name]['cosine'].append(float(cosine_value))
         else:
-            sims_arr = np.asarray(cosine, dtype=np.float64).ravel()
+            sims_arr = np.asarray(cosine_value, dtype=np.float64).ravel()
             self.mlp_impact_history[layer_name]['cosine'].extend(sims_arr.tolist())
         
         # Clear cache
@@ -381,174 +422,183 @@ class NeuronDefuser:
             p_max: Maximum pruning ratio per layer (default: 0.90)
             epsilon: Small constant for numerical stability (default: 1e-6)
             max_iterations: Maximum iterations for budget correction (default: 100)
+
+        Calculate topk based on accumulated impact metrics
         """
-        """Calculate topk based on accumulated impact metrics"""
-        pass
-        # if self.per_layer_topk[layer_name] == -2:
-        #     num_layers = len(self.mlp_impact_history)
+        if self.per_layer_topk[layer_name] == -2:
+            num_layers = len(self.mlp_impact_history)
 
-        #     if num_layers == 0:
-        #         print("WARNING: No MLP impact history available for auto-topk calculation!")
-        #         return
+            if num_layers == 0:
+                print("WARNING: No MLP impact history available for auto-topk calculation!")
+                return
 
-        #     avg_cosine = []
-        #     avg_ratio_norm = []
-        #     for layer_name, metrics in self.mlp_impact_history:
-        #         avg_cosine.append(np.mean(metrics['cosine']))
-        #         avg_ratio_norm.append(np.mean(metrics['delta']))
-        #     layers = np.arange(num_layers)
-        #     avg_cosine = np.array(avg_cosine)
-        #     avg_ratio_norm = np.array(avg_ratio_norm)
+            avg_cosine = []
+            avg_ratio_norm = []
+            for layer_name, metrics in self.mlp_impact_history.items():
+                avg_cosine.append(np.mean(metrics['cosine']))
+                avg_ratio_norm.append(np.mean(metrics['delta']))
+            layers = np.arange(num_layers)
+            avg_cosine = np.array(avg_cosine)
+            avg_ratio_norm = np.array(avg_ratio_norm)
             
-        #     L = num_layers
-        #     rho = total_prune_percent / 100.0
-        #     B = rho * L  # Total pruning budget
+            L = num_layers
+            rho = total_prune_percent / 100.0
+            B = rho * L  # Total pruning budget
             
-        #     print(f"\n  {'='*80}")
-        #     print(f"  Depth-Aware Pruning Strategy")
-        #     print(f"  {'='*80}")
-        #     print(f"  Target: {total_prune_percent}% total pruning (B = ρL = {B:.2f})")
-        #     print(f"  Layers: L = {L}")
-        #     print(f"  Config: we={we}, wl={wl}, α={alpha}, β={beta}, p_min={p_min}, p_max={p_max}")
+            print(f"\n  {'='*80}")
+            print(f"  Depth-Aware Pruning Strategy")
+            print(f"  {'='*80}")
+            print(f"  Target: {total_prune_percent}% total pruning (B = ρL = {B:.2f})")
+            print(f"  Layers: L = {L}")
+            print(f"  Config: we={we}, wl={wl}, α={alpha}, β={beta}, p_min={p_min}, p_max={p_max}")
             
-        #     # ==================== STEP 1: Per-layer functional importance ====================
-        #     # S_ℓ = (1 - cos_ℓ) · ||Δx_ℓ|| / ||x_ℓ,pre||
-        #     S = (1 - avg_cosine) * (avg_ratio_norm)
+            # ==================== STEP 1: Per-layer functional importance ====================
+            # S_ℓ = (1 - cos_ℓ) · ||Δx_ℓ|| / ||x_ℓ,pre||
+            S = (1 - avg_cosine) * (avg_ratio_norm)
             
-        #     # ==================== STEP 2: Normalize importance ====================
-        #     # Ŝ_ℓ = (S_ℓ - min S_j) / (max S_j - min S_j + ε)
-        #     S_min = np.min(S)
-        #     S_max = np.max(S)
-        #     S_hat = (S - S_min) / (S_max - S_min + epsilon)
+            # ==================== STEP 2: Normalize importance ====================
+            # Ŝ_ℓ = (S_ℓ - min S_j) / (max S_j - min S_j + ε)
+            S_min = np.min(S)
+            S_max = np.max(S)
+            S_hat = (S - S_min) / (S_max - S_min + epsilon)
             
-        #     # ==================== STEP 3: Relative pruning pressure ====================
-        #     # R_ℓ = 1 - Ŝ_ℓ
-        #     R = 1 - S_hat
+            # ==================== STEP 3: Relative pruning pressure ====================
+            # R_ℓ = 1 - Ŝ_ℓ
+            R = 1 - S_hat
             
-        #     # ==================== STEP 4: Depth-aware protection factor ====================
-        #     # z_ℓ = ℓ / (L - 1)
-        #     z = layers / (L - 1)
-        #     D = np.ones(num_layers)
+            # ==================== STEP 4: Depth-aware protection factor ====================
+            # z_ℓ = ℓ / (L - 1)
+            z = layers / (L - 1)
+            D = np.ones(num_layers)
             
-        #     for i in range(num_layers):
-        #         if z[i] < we:
-        #             # Early layers: α + (1 - α) * z_ℓ / w_e
-        #             D[i] = alpha + (1 - alpha) * (z[i] / we)
-        #         elif z[i] > (1 - wl):
-        #             # Late layers: β + (1 - β) * (1 - z_ℓ) / w_l
-        #             D[i] = beta + (1 - beta) * ((1 - z[i]) / wl)
-        #         else:
-        #             # Middle layers: no protection
-        #             D[i] = 1.0
+            for i in range(num_layers):
+                if z[i] < we:
+                    # Early layers: α + (1 - α) * z_ℓ / w_e
+                    D[i] = alpha + (1 - alpha) * (z[i] / we)
+                elif z[i] > (1 - wl):
+                    # Late layers: β + (1 - β) * (1 - z_ℓ) / w_l
+                    D[i] = beta + (1 - beta) * ((1 - z[i]) / wl)
+                else:
+                    # Middle layers: no protection
+                    D[i] = 1.0
             
-        #     # ==================== STEP 5: Final pruning pressure ====================
-        #     # P_ℓ = R_ℓ · D_ℓ
-        #     P_pressure = R * D
+            # ==================== STEP 5: Final pruning pressure ====================
+            # P_ℓ = R_ℓ · D_ℓ
+            P_pressure = R * D
             
-        #     # ==================== STEP 6: Budgeted pruning allocation ====================
-        #     # p̃_ℓ = B · P_ℓ / Σ_j P_j
-        #     P_sum = np.sum(P_pressure)
-        #     p_tilde = B * (P_pressure / P_sum)
+            # ==================== STEP 6: Budgeted pruning allocation ====================
+            # p̃_ℓ = B · P_ℓ / Σ_j P_j
+            P_sum = np.sum(P_pressure)
+            p_tilde = B * (P_pressure / P_sum)
             
-        #     # ==================== STEP 7: Enforce safety bounds ====================
-        #     # p_ℓ^(0) = clip(p̃_ℓ, p_min, p_max)
-        #     p_0 = np.clip(p_tilde, p_min, p_max)
+            # ==================== STEP 7: Enforce safety bounds ====================
+            # p_ℓ^(0) = clip(p̃_ℓ, p_min, p_max)
+            p_0 = np.clip(p_tilde, p_min, p_max)
             
-        #     initial_sum = np.sum(p_0)
-        #     initial_delta = B - initial_sum
+            # ==================== STEP 8: Budget correction ====================
+            # Iteratively redistribute Δ among layers not at p_max (when Δ > 0)
+            p = p_0.copy()
+            iteration = 0
             
-        #     # ==================== STEP 8: Budget correction ====================
-        #     # Iteratively redistribute Δ among layers not at p_max (when Δ > 0)
-        #     p = p_0.copy()
-        #     iteration = 0
-            
-        #     while iteration < max_iterations:
-        #         current_sum = np.sum(p)
-        #         delta = B - current_sum
+            while iteration < max_iterations:
+                current_sum = np.sum(p)
+                delta = B - current_sum
                 
-        #         # Check convergence
-        #         if abs(delta) < epsilon:
-        #             print(f"    ✓ Converged at iteration {iteration}: |Δ| = {abs(delta):.9f} < ε")
-        #             break
+                # Check convergence
+                if abs(delta) < epsilon:
+                    print(f"    ✓ Converged at iteration {iteration}: |Δ| = {abs(delta):.9f} < ε")
+                    break
                 
-        #         # Determine which layers can be adjusted based on sign of delta
-        #         if delta > 0:
-        #             # Need to prune MORE: only adjust layers below p_max (can increase pruning)
-        #             available_mask = p < (p_max - epsilon)
-        #             operation = "increase pruning"
-        #         else:
-        #             # Need to prune LESS: only adjust layers above p_min (can decrease pruning)
-        #             available_mask = p > (p_min + epsilon)
-        #             operation = "decrease pruning"
+                # Determine which layers can be adjusted based on sign of delta
+                if delta > 0:
+                    # Need to prune MORE: only adjust layers below p_max (can increase pruning)
+                    available_mask = p < (p_max - epsilon)
+                    operation = "increase pruning"
+                else:
+                    # Need to prune LESS: only adjust layers above p_min (can decrease pruning)
+                    available_mask = p > (p_min + epsilon)
+                    operation = "decrease pruning"
                 
-        #         if not np.any(available_mask):
-        #             if delta > 0:
-        #                 print(f"    ⚠ All layers at p_max. Cannot prune more.")
-        #             else:
-        #                 print(f"    ⚠ All layers at p_min. Cannot prune less.")
-        #             print(f"      Final sum: {current_sum:.6f}, Target: {B:.6f}, Gap: {delta:.6f}")
-        #             break
+                if not np.any(available_mask):
+                    if delta > 0:
+                        print(f"    ⚠ All layers at p_max. Cannot prune more.")
+                    else:
+                        print(f"    ⚠ All layers at p_min. Cannot prune less.")
+                    print(f"      Final sum: {current_sum:.6f}, Target: {B:.6f}, Gap: {delta:.6f}")
+                    break
                 
-        #         # Weighted redistribution: p_ℓ = p_ℓ + Δ · [indicator · P_ℓ] / Σ[indicator · P_j]
-        #         available_P = P_pressure * available_mask
-        #         P_available_sum = np.sum(available_P)
+                # Weighted redistribution: p_ℓ = p_ℓ + Δ · [indicator · P_ℓ] / Σ[indicator · P_j]
+                available_P = P_pressure * available_mask
+                P_available_sum = np.sum(available_P)
                 
-        #         if P_available_sum > epsilon:
-        #             redistribution = delta * (available_P / P_available_sum)
-        #             p = p + redistribution
+                if P_available_sum > epsilon:
+                    redistribution = delta * (available_P / P_available_sum)
+                    p = p + redistribution
                     
-        #             # Re-clip to bounds
-        #             p = np.clip(p, p_min, p_max)
-        #         else:
-        #             # Fallback: uniform redistribution if no pressure weights available
-        #             num_available = np.sum(available_mask)
-        #             redistribution = delta / num_available
-        #             p[available_mask] += redistribution
-        #             p = np.clip(p, p_min, p_max)
+                    # Re-clip to bounds
+                    p = np.clip(p, p_min, p_max)
+                else:
+                    # Fallback: uniform redistribution if no pressure weights available
+                    num_available = np.sum(available_mask)
+                    redistribution = delta / num_available
+                    p[available_mask] += redistribution
+                    p = np.clip(p, p_min, p_max)
                 
-        #         iteration += 1
+                iteration += 1
                 
-        #         if iteration % 10 == 0:
-        #             print(f"    Iteration {iteration}: Δ = {delta:.9f}, {operation}, available = {np.sum(available_mask)}")
+                if iteration % 10 == 0:
+                    print(f"    Iteration {iteration}: Δ = {delta:.9f}, {operation}, available = {np.sum(available_mask)}")
             
-        #     if iteration >= max_iterations:
-        #         print(f"    ⚠ Reached max iterations ({max_iterations})")
+            if iteration >= max_iterations:
+                print(f"    ⚠ Reached max iterations ({max_iterations})")
             
-        #     # ==================== STEP 9: Final results ====================
-        #     final_sum = np.sum(p)
-        #     final_percent = (final_sum / L) * 100
+            # ==================== STEP 9: Final results ====================
+            final_sum = np.sum(p)
+            final_percent = (final_sum / L) * 100
             
-        #     print(f"\n  Step 9: Final pruning ratios")
-        #     print(f"    Sum: {final_sum:.6f} / {B:.6f} (satisfaction: {(final_sum/B)*100:.2f}%)")
-        #     print(f"    Average per-layer: {final_percent:.2f}%")
+            print(f"\n  Step 9: Final pruning ratios")
+            print(f"    Sum: {final_sum:.6f} / {B:.6f} (satisfaction: {(final_sum/B)*100:.2f}%)")
+            print(f"    Average per-layer: {final_percent:.2f}%")
             
-        #     # Convert to percentages for display
-        #     p_percent = p * 100
-        #     keep_percent = 100 - p_percent
+            # Convert to percentages for display
+            p_percent = p * 100
+            keep_percent = 100 - p_percent
             
-        #     # ==================== Detailed Output ====================
-        #     print(f"\n  {'='*115}")
-        #     print(f"  Layer-wise Breakdown")
-        #     print(f"  {'='*115}")
-        #     print(f"  {'Layer':<6} {'z_ℓ':<8} {'S_ℓ':<10} {'Ŝ_ℓ':<10} {'R_ℓ':<10} {'D_ℓ':<10} {'P_ℓ':<10} {'p̃_ℓ':<10} {'p_ℓ':<10} {'Prune%':<10} {'Keep%':<10}")
-        #     print(f"  {'-'*115}")
+            # ==================== Detailed Output ====================
+            print(f"\n  {'='*115}")
+            print(f"  Layer-wise Breakdown")
+            print(f"  {'='*115}")
+            print(f"  {'Layer':<6} {'z_ℓ':<8} {'S_ℓ':<10} {'Ŝ_ℓ':<10} {'R_ℓ':<10} {'D_ℓ':<10} {'P_ℓ':<10} {'p̃_ℓ':<10} {'p_ℓ':<10} {'Prune%':<10} {'Keep%':<10}")
+            print(f"  {'-'*115}")
             
-        #     for i in range(num_layers):
-        #         print(f"  {layers[i]:<6} {z[i]:<8.4f} {S[i]:<10.6f} {S_hat[i]:<10.6f} {R[i]:<10.6f} {D[i]:<10.6f} "
-        #             f"{P_pressure[i]:<10.6f} {p_tilde[i]:<10.6f} {p[i]:<10.6f} {p_percent[i]:<10.2f} {keep_percent[i]:<10.2f}")
+            for i in range(num_layers):
+                print(f"  {layers[i]:<6} {z[i]:<8.4f} {S[i]:<10.6f} {S_hat[i]:<10.6f} {R[i]:<10.6f} {D[i]:<10.6f} "
+                    f"{P_pressure[i]:<10.6f} {p_tilde[i]:<10.6f} {p[i]:<10.6f} {p_percent[i]:<10.2f} {keep_percent[i]:<10.2f}")
             
-        #     # ==================== Summary Statistics ====================
-        #     print(f"\n  {'='*80}")
-        #     print(f"  Summary Statistics")
-        #     print(f"  {'='*80}")
-        #     print(f"  Target Total Pruning:     {total_prune_percent:.2f}%")
-        #     print(f"  Actual Total Pruning:     {final_percent:.2f}%")
+            # ==================== Summary Statistics ====================
+            print(f"\n  {'='*80}")
+            print(f"  Summary Statistics")
+            print(f"  {'='*80}")
+            print(f"  Target Total Pruning:     {total_prune_percent:.2f}%")
+            print(f"  Actual Total Pruning:     {final_percent:.2f}%")
             
-        #     #TODO: Check this logic tomorrow!
-        #     self.per_layer_topk[layer_name] = int(round((1 - p[self.layer_name_to_number[layer_name]]) * hidden_dim))
-        # else:
-        #     print(f"SAFETY HARNESS(will not run ideally): Layer {layer_name} has already been updated with the auto pruning calculations.")
-        #     return self.per_layer_topk[layer_name]
+            # Update all layers at once with their calculated topk values
+            print(f"\n  {'='*80}")
+            print(f"  Setting per-layer topk values:")
+            print(f"  {'='*80}")
+            for layer_idx in range(num_layers):
+                # Find the layer_name for this layer_idx
+                target_layer_name = self.layer_number_to_name[layer_idx]
+                # Calculate neurons to keep: (1 - prune_ratio) * total_neurons
+                neurons_to_keep = int(round((1 - p[layer_idx]) * hidden_dim))
+                self.per_layer_topk[target_layer_name] = neurons_to_keep
+                print(f"    Layer {layer_idx} ({target_layer_name}): keep {neurons_to_keep}/{hidden_dim} neurons (prune {p_percent[layer_idx]:.2f}%)")
+            
+            # Return the topk for the requested layer
+            return self.per_layer_topk[layer_name]
+        else:
+            print(f"SAFETY HARNESS: Layer {layer_name} has already been updated with auto pruning calculations.")
+            return self.per_layer_topk[layer_name]
 
     def save_results(self, filename_prefix="neuron_masking", output_dir=None):
         """Save the stored neuron statistics to files."""

@@ -22,27 +22,27 @@ MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-
 CACHE_DIR="llm_weights"
 
 # Prompt configuration
-PROMPT_TYPE="custom"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="imc_definition"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
+PROMPT_SUBJECT="college_computer_science"           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH=2000               # Leave empty for None (no prompt length limit)
+PROMPT_LENGTH=500               # Leave empty for None (no prompt length limit)
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
-##LAYER_TOPK="10:0.5,11:0.5,12:0.5,13:0.5,14:0.5,15:0.5,16:0.5,17:0.5,18:0.5,19:0.5,20:0.5"
-##MASKING_STEP=100
-##GENERATION=150
-##EMA_DECAY=0.5
-##RANKING_METHOD="combined"
-##PRUNE_STRATEGY="topk"
+LAYER_TOPK="all:auto"
+MASKING_STEP=0
+GENERATION=0
+EMA_DECAY=""
+RANKING_METHOD="max"
+PRUNE_STRATEGY="topk"
 
 ## Comment these out when pruning.
-LAYER_TOPK=""
-MASKING_STEP=""
-GENERATION=0
-EMA_DECAY="0.5"                    # Decay factor for EMA (0.0 to 1.0, leave empty for None/L2 norm)
-RANKING_METHOD="max"        # Method to rank neurons - max, mean, combined, product, magnitude
-PRUNE_STRATEGY="auto"           # Pruning strategy - topk, auto
+# LAYER_TOPK=""
+# MASKING_STEP=""
+# GENERATION=0
+# EMA_DECAY="0.5"                    # Decay factor for EMA (0.0 to 1.0, leave empty for None/L2 norm)
+# RANKING_METHOD="max"        # Method to rank neurons - max, mean, combined, product, magnitude
+# PRUNE_STRATEGY="auto"           # Pruning strategy - topk, auto
 
 # Activation saving configuration
 SAVE_ACTIVATIONS=true       # Set to true to save activations (uses more memory)
@@ -57,8 +57,8 @@ PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high
 PPL_MAX_SAMPLES=200             # Max samples for perplexity eval (leave empty for all)
 
 # Evaluation configuration - MMLU
-EVAL_MMLU=false             # Set to true to enable MMLU evaluation
-MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
+EVAL_MMLU=true             # Set to true to enable MMLU evaluation
+MMLU_DATASETS="college_computer_science high_school_world_history marketing philosophy"
 #MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"
                                # MMLU subjects to evaluate (space-separated)
 MMLU_SHOTS=2                   # Number of few-shot examples (0=zero-shot, 5=five-shot)
@@ -71,7 +71,7 @@ GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty f
 
 # Results directory
 EXPERIMENT_NAME=${PROMPT_TYPE}_${PROMPT_SUBJECT}
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/activations/neuron_score"
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/dlp_comparison"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
