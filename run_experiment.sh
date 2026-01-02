@@ -15,17 +15,17 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
-DEVICE=0                  # CUDA device ID
+DEVICE=1                  # CUDA device ID
 
 # Model configuration
-MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
+MODEL="meta-llama/Llama-2-7b-hf" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
 CACHE_DIR="llm_weights"
 
 # Prompt configuration
 PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="college_computer_science"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_SUBJECT="marketing"           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH=500               # Leave empty for None (no prompt length limit)
+PROMPT_LENGTH=4000               # Leave empty for None (no prompt length limit)
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
@@ -35,6 +35,7 @@ GENERATION=0
 EMA_DECAY=""
 RANKING_METHOD="max"
 PRUNE_STRATEGY="topk"
+TOTAL_PRUNE_PERCENT=60.0
 
 ## Comment these out when pruning.
 # LAYER_TOPK=""
@@ -45,10 +46,10 @@ PRUNE_STRATEGY="topk"
 # PRUNE_STRATEGY="auto"           # Pruning strategy - topk, auto
 
 # Activation saving configuration
-SAVE_ACTIVATIONS=true       # Set to true to save activations (uses more memory)
+SAVE_ACTIVATIONS=false       # Set to true to save activations (uses more memory)
 
 # Evaluation configuration - Perplexity
-EVAL_PERPLEXITY=false           # Set to true to enable perplexity evaluation
+EVAL_PERPLEXITY=true           # Set to true to enable perplexity evaluation
 PPL_DATASETS="mmlu"          # Options: "custom", "mmlu" (space-separated)
 PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"             # Subjects for perplexity evaluation (space-separated)
 #PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"             # Subjects for perplexity evaluation (space-separated)
@@ -70,8 +71,8 @@ GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_ea
 GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-EXPERIMENT_NAME=${PROMPT_TYPE}_${PROMPT_SUBJECT}
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/dlp_comparison"
+EXPERIMENT_NAME=${PROMPT_TYPE}_${PROMPT_SUBJECT}_${TOTAL_PRUNE_PERCENT}prune
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/wanda_comparison"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
@@ -112,6 +113,7 @@ print_config() {
     echo "EMA Decay: ${EMA_DECAY:-None (L2 norm)}"
     echo "Ranking Method: $RANKING_METHOD"
     echo "Prune Strategy: $PRUNE_STRATEGY"
+    echo "Total Prune Percent: $TOTAL_PRUNE_PERCENT%"
     echo "Generation Tokens: $GENERATION"
     echo "Save Activations: $SAVE_ACTIVATIONS"
     echo ""
@@ -210,6 +212,7 @@ cat > "$CONFIG_LOG" << EOF
     "ema_decay": $EMA_DECAY_JSON,
     "ranking_method": "$RANKING_METHOD",
     "prune_strategy": "$PRUNE_STRATEGY",
+    "total_prune_percent": $TOTAL_PRUNE_PERCENT,
     "generation": $GENERATION
   },
   "evaluation": {
@@ -284,6 +287,10 @@ CMD="$CMD \
 # Add prune_strategy
 CMD="$CMD \
     --prune_strategy \"$PRUNE_STRATEGY\""
+
+# Add total_prune_percent
+CMD="$CMD \
+    --total_prune_percent $TOTAL_PRUNE_PERCENT"
 
 # Always add generation (assuming it's required)
 CMD="$CMD \

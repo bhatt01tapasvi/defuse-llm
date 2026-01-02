@@ -12,7 +12,7 @@ PRUNE_DIR = os.path.join(RESULTS_DIR, "pruneNeurons")
 #MAX_FORWARD_PROXY = os.path.join(PRUNING_DIR, "maxProxy")
 
 class NeuronDefuser:
-    def __init__(self, maskingStep: int=0, per_layer_topk: dict=None, ema_decay: float=None, ranking_method: str='combined', prune_strategy: str='topk', device: str='cuda'):
+    def __init__(self, maskingStep: int=0, per_layer_topk: dict=None, ema_decay: float=None, ranking_method: str='combined', prune_strategy: str='topk', total_prune_percent: float=50.0, device: str='cuda'):
         """
         Args:
             maskingStep: Step at which to start applying masks
@@ -20,6 +20,8 @@ class NeuronDefuser:
                            Use -1 to skip pruning for that layer.
             ema_decay: Decay factor for EMA (0.0 to 1.0)
             ranking_method: One of ['max', 'mean', 'combined', 'product']
+            prune_strategy: 'topk' or 'threshold'
+            total_prune_percent: Target total pruning percentage for adaptive pruning (default: 50.0)
             device: Device to run on
         """
         self.currIteration = 0
@@ -28,6 +30,7 @@ class NeuronDefuser:
         self.ema_decay = ema_decay  # Decay factor for EMA
         self.ranking_method = ranking_method
         self.prune_strategy = prune_strategy  # 'topk' or 'threshold'
+        self.total_prune_percent = total_prune_percent  # Target total pruning percentage
 
         # Store the original per_layer_topk config
         self.per_layer_topk_config = per_layer_topk if per_layer_topk is not None else {}
@@ -266,7 +269,7 @@ class NeuronDefuser:
                     return activations3
                 ## END SAFETY HARNESS ##
                 
-                layer_topk = self.compute_adaptive_topk(layer_name=layer_name, hidden_dim=hidden_dim, total_prune_percent=50.0)
+                layer_topk = self.compute_adaptive_topk(layer_name=layer_name, hidden_dim=hidden_dim, total_prune_percent=self.total_prune_percent)
                 print(f"Auto-calculated topk for layer {layer_num}: {layer_topk}")
             else:
                 print(f"Using manual topk for layer {layer_num}: {layer_topk}")
@@ -326,8 +329,6 @@ class NeuronDefuser:
         if layer_name in self.masks and self.masks[layer_name] is not None:
             activations3 *= self.masks[layer_name]
             #print the dimensions of activations3
-            print(f"Applied mask to layer {layer_name}, activations shape: {activations3.shape}")
-
             # Check the mast is applied properly by counting the number of 0 and that they match the masked neurons.
             num_masked = (self.masks[layer_name] == 0).sum().item()
             num_actually_masked = (activations3[-1][:, self.masks[layer_name] == 0] == 0).all(dim=0).sum().item()
@@ -337,6 +338,8 @@ class NeuronDefuser:
 
     def cache_pre_mlp(self, layer_name, activation):
         """Called by post_attention_layernorm hook"""
+        if self.maskingStep is None:
+            return
         if self.currIteration > self.maskingStep:
             return
         print(f"Caching pre-MLP activations for layer {layer_name} and activation value {activation.shape}")
@@ -344,6 +347,8 @@ class NeuronDefuser:
 
     def calculate_mlp_impact(self, layer_name, post_mlp_activation):
         """Called by mlp_down post-hook"""
+        if self.maskingStep is None:
+            return
         if self.currIteration > self.maskingStep:
             return
         if layer_name not in self.pre_mlp_cache:

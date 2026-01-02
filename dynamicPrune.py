@@ -355,6 +355,7 @@ def main():
     parser.add_argument('--ranking_method', type=str, default="combined", 
                    help='Method to rank neurons for pruning - max, mean, combined, product, magnitude')
     parser.add_argument('--prune_strategy', type=str, default="topk", help='Pruning strategy - topk, automatic configure threshold as mean')
+    parser.add_argument('--total_prune_percent', type=float, default=50.0, help='Target total pruning percentage for adaptive pruning (e.g., 50.0 for 50%%)')
 
     # Evaluation arguments
     #### Perplexity
@@ -456,6 +457,7 @@ def main():
         ema_decay=args.ema_decay,
         ranking_method=args.ranking_method,
         prune_strategy=args.prune_strategy,
+        total_prune_percent=args.total_prune_percent,
         device=device
     )
     
