@@ -142,7 +142,7 @@ def parse_layer_topk(layer_spec: str, num_layers: int, intermediate_size: int) -
     
     return per_layer_topk
 
-def initialize_prompt(tokenizer, device, max_seq_len: int, prompt_type="custom", prompt_length=None, prompt_subject="imc", custom_text=None):
+def initialize_prompt(tokenizer, device, max_seq_len: int, prompt_type="custom", prompt_length=None, prompt_subject=None, custom_text=None):
     """
     Initialize a prompt based on type and length constraints.
     
@@ -334,7 +334,7 @@ def main():
                        help='Type of prompt: mmlu, custom')
     parser.add_argument('--prompt_length', type=int, default=None,
                        help='Maximum prompt length in tokens. If None, uses full prompt.')
-    parser.add_argument('--prompt_subject', type=str, default="imc",
+    parser.add_argument('--prompt_subject', type=str, default=None,
                        help='Prompt subject name: Custom :: imc, imc2, imc3, imc_para, imc2_para, imc_word, '
                             'pizzas, pizzas_para, pizzas_word, actress, actress_para, actress_word, '
                             'astrophysics, astro_word, maths' \
@@ -351,6 +351,7 @@ def main():
                             '"0-5:0.6" (60%% to layers 0-5), '
                             '"0-5:0.6,6-11:0.8" (mixed ranges)')
     parser.add_argument('--maskingStep', type=int, default=None, help='Step at which to start masking neurons')
+    parser.add_argument('--releaseStep', type=int, default=None, help='Step at which to release masked neurons')
     parser.add_argument('--ema_decay', type=float, default=None, help='Decay factor for EMA (0.0 to 1.0)')
     parser.add_argument('--ranking_method', type=str, default="combined", 
                    help='Method to rank neurons for pruning - max, mean, combined, product, magnitude')
@@ -419,7 +420,9 @@ def main():
     # Datastructures for storing the activations.
     pre_ln1_activations = defaultdict(list)     # For storing the activations before the LayerNorm1 layers | This is for storing the residual
     pre_attn_activations = defaultdict(list)    # For storing the activations before the attention layers | This is also the output after layer norm 1.
+    post_attn_weights = defaultdict(list)         # For storing the attention weights
     post_attn_activations = defaultdict(list)   # For storing the activations after the attention layers
+    post_attn_oproj_activations = defaultdict(list)   # For storing the activations after the attention output projection layers
     pre_ln2_activations = defaultdict(list)     # For storing the activations before the LayerNorm2 layers | This is post_attn_act + residual(pre_ln1)
     pre_mlp1_activations = defaultdict(list)     # For storing the activations before the MLP layers | This is equivalent to output of ln2.
     pre_mlp2_activations = defaultdict(list)     # For storing the activations of the neurons(inside the MLPs) | This is the neurons
@@ -452,7 +455,8 @@ def main():
 
     # Initialize NeuronDefuser with per-layer configuration
     neuronDefuser = NeuronDefuser(
-        maskingStep=args.maskingStep, 
+        maskingStep=args.maskingStep,
+        releaseStep=args.releaseStep, 
         per_layer_topk=per_layer_config,
         ema_decay=args.ema_decay,
         ranking_method=args.ranking_method,
@@ -466,15 +470,19 @@ def main():
     if model_type == 'gpt2':
         hooks = setup_hooks_gpt2(
             model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
-            post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
-            pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
+            post_attn_weights, post_attn_activations, post_attn_oproj_activations,
+            pre_ln2_activations, pre_mlp1_activations,
+            pre_mlp2_activations, post_mlp2_activations, 
+            post_layer_activations,
             mlp2_forward_proxy, embedding_weights, save_activations=args.save_activations
         )
     elif model_type == 'llama':
         hooks = setup_hooks_llama(
             model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
-            post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
-            pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
+            post_attn_weights, post_attn_activations, post_attn_oproj_activations, 
+            pre_ln2_activations, pre_mlp1_activations,
+            pre_mlp2_activations, post_mlp2_activations, 
+            post_layer_activations,
             mlp2_forward_proxy, embedding_weights, mlp2_weights, save_activations=args.save_activations
         )
     profiler.end("hook_setup")
@@ -508,6 +516,10 @@ def main():
     past_key_values = outputs.past_key_values
     all_tokens = input_ids
     
+    # Track tokens before and after masking
+    pre_masking_tokens = []
+    post_masking_tokens = []
+    
     profiler.start("generation_phase")
     for i in range(args.generation):
         iter_start = time.time()
@@ -521,12 +533,34 @@ def main():
             next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
             all_tokens = torch.cat([all_tokens, next_token], dim=-1)
             past_key_values = outputs.past_key_values
+            
+            # Track which phase this token was generated in
+            token_id = next_token.item()
+            if args.maskingStep is not None and i < args.maskingStep:
+                pre_masking_tokens.append(token_id)
+            elif args.maskingStep is not None and i >= args.maskingStep:
+                post_masking_tokens.append(token_id)
         
         if i % 10 == 0:
             print(f"Token {i}: {time.time() - iter_start:.3f}s")
     
     profiler.end("generation_phase")
     times['generation'] = time.time() - start
+    
+    # Print token generation breakdown
+    if args.maskingStep is not None and args.generation > 0:
+        print("\n" + "="*80)
+        print("TOKEN GENERATION BREAKDOWN")
+        print("="*80)
+        print(f"Masking activated at token: {args.maskingStep}")
+        print(f"\nPre-masking tokens (0 to {args.maskingStep-1}): {len(pre_masking_tokens)} tokens")
+        print(f"Token IDs: {pre_masking_tokens}")
+        print(f"Decoded text:\n{tokenizer.decode(pre_masking_tokens)}")
+        print("-"*80)
+        print(f"Post-masking tokens ({args.maskingStep} to {args.generation-1}): {len(post_masking_tokens)} tokens")
+        print(f"Token IDs: {post_masking_tokens}")
+        print(f"Decoded text:\n{tokenizer.decode(post_masking_tokens)}")
+        print("="*80 + "\n")
 
     if args.save_activations:
         os.makedirs(args.save_res_dir, exist_ok=True)
@@ -536,15 +570,17 @@ def main():
             pickle.dump({
                 'pre_ln1_activations': pre_ln1_activations,
                 'pre_attn_activations': pre_attn_activations,
+                'post_attn_weights': post_attn_weights,
                 'post_attn_activations': post_attn_activations,
+                'post_attn_oproj_activations': post_attn_oproj_activations,
                 'pre_ln2_activations': pre_ln2_activations,
                 'pre_mlp1_activations': pre_mlp1_activations,
                 'pre_mlp2_activations': pre_mlp2_activations,
                 'post_mlp2_activations': post_mlp2_activations,
                 'post_layer_activations': post_layer_activations,
-                'mlp2_weights': mlp2_weights,
-                'embedding_weights': embedding_weights,
-                'mlp2_forward_proxy': mlp2_forward_proxy,
+                #'mlp2_weights': mlp2_weights,
+                #'embedding_weights': embedding_weights,
+                #'mlp2_forward_proxy': mlp2_forward_proxy,
                 #'model_type': model_type
             }, f)
         print(f"Activations saved to {save_path}")

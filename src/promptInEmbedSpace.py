@@ -6,6 +6,7 @@ from collections import defaultdict
 import numpy as np
 from util import data_loader
 from scipy.spatial.distance import cosine
+from scipy.stats import norm
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -48,6 +49,43 @@ def compute_global_means(all_datasets: list[Tuple[str, Dict[str, Any]]], embed: 
     for layer_name in global_token_sums.keys():
         global_means[layer_name] = global_token_sums[layer_name] / global_token_counts[layer_name]
     
+def flatten_activation_structure(activations_dict: Dict[str, list]) -> Dict[str, list]:
+    """
+    Flatten activation structure so each element is a single token (1, embed_dim).
+    
+    Input structure:
+    - activations_dict[layer][0] has shape (num_prefill_tokens, embed_dim)
+    - activations_dict[layer][1:] each have shape (1, embed_dim)
+    
+    Output structure:
+    - activations_dict[layer][i] has shape (1, embed_dim) for all i
+    
+    Args:
+        activations_dict: Dictionary with layer names as keys and lists of activations
+        
+    Returns:
+        Flattened dictionary with same structure but each element is single token
+    """
+    flattened = {}
+    
+    for layer_name, activations_list in activations_dict.items():
+        flattened_list = []
+        
+        for idx, activation in enumerate(activations_list):
+            if idx == 0 and activation.shape[0] > 1:
+                # This is the prefill phase with multiple tokens
+                # Split into individual tokens, each with shape (1, embed_dim)
+                for token_idx in range(activation.shape[0]):
+                    single_token = activation[token_idx:token_idx+1]  # Keep 2D shape
+                    flattened_list.append(single_token)
+            else:
+                # Already a single token, just append
+                flattened_list.append(activation)
+        
+        flattened[layer_name] = flattened_list
+    
+    return flattened
+
 def euclidean_distance(emb1, emb2):
     """Sensitive to magnitude - good for normalized embeddings"""
     emb1 = emb1.astype(np.float64)
@@ -219,33 +257,525 @@ def compareInEmbedSpaceSummary(datasets: list[Tuple[str, Any]], embed: str):
                 save_path = os.path.join(RESULTS_DIR, f"{name_a}_vs_{name_b}_comparison.csv")
                 create_comparison_table(token_comp, sent_comp, save_path, f"{name_a} vs {name_b} Comparison")
 
-def compareDomainConsistency(data_a: Dict[str, Any], data_b: Dict[str, Any], embed: str):
-
-    #We will only study the last layer because that determines how much the domain consistency is maintained.
-    last_layer = list(data_a[embed].items())[-1][0]
+def compare_t_t_Consistency(model, data_a: Dict[str, Any], data_b: Dict[str, Any], embed: str, topic: str = "default", layer_num: int = -1):
+    """
+    Compare two sequences token-by-token using cosine similarity.
     
-    # Maintain the dictionary structure that compareInEmbedSpace expects
-    # Structure: {layer_name: [forward_passes]} where each forward_pass is [tokens][dimensions]
-    modified_data_a = {last_layer: data_a[embed][last_layer]}
+    After flattening, each element in the activation list is a single token with shape (1, embed_dim).
+    This function compares corresponding tokens between data_a and data_b.
     
-    # Compute domain consistency metrics
-    # I want to keep the first embed constant but keep sending progressive tokens of the second data vector.
-    num_tokens = data_b[embed][last_layer][-1].shape[0]
-    token_comp_list = []
-    sent_comp_list = []
+    Args:
+        data_a: First dataset (e.g., unpruned model)
+        data_b: Second dataset (e.g., pruned model)
+        embed: Key for the activation type to compare (e.g., 'pre_ln2_activations')
+        topic: Topic name for organizing results (default: 'default')
+        layer_num: Layer index to analyze (default: -1 for last layer)
+    """
+    
+    print("\n" + "="*80)
+    print("TOKEN-BY-TOKEN DOMAIN CONSISTENCY ANALYSIS")
+    print("="*80)
+    
+    # Get the specified layer
+    all_layers = list(data_a[embed].keys())
+    layer = all_layers[layer_num]
+    
+    print(f"Analyzing layer: {layer} (index: {layer_num})")
+    
+    # Get token lists (after flattening, each element is a single token with shape (1, embed_dim))
+    tokens_a = data_a[embed][layer]
+    tokens_b = data_b[embed][layer]
+    
+    num_tokens_a = len(tokens_a)
+    num_tokens_b = len(tokens_b)
+    
+    print(f"Number of tokens in data_a: {num_tokens_a}")
+    print(f"Number of tokens in data_b: {num_tokens_b}")
+    
+    # Use the minimum number of tokens for comparison
+    num_tokens = min(num_tokens_a, num_tokens_b)
+    print(f"Comparing first {num_tokens} tokens\n")
+    
+    # Store token-by-token comparisons
+    comparison_results = []
+    
+    for token_idx in range(num_tokens):
+        # Get individual token embeddings (shape: (1, embed_dim))
+        token_a = tokens_a[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        token_b = tokens_b[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        
+        # Compute cosine similarity
+        cos_sim = cosine_similarity(token_a, token_b)
+        
+        # Compute Euclidean distance
+        eucl_dist = euclidean_distance(token_a, token_b)
+        
+        # Compute magnitude ratio
+        mag_a = np.linalg.norm(token_a)
+        mag_b = np.linalg.norm(token_b)
+        mag_ratio = mag_a / (mag_b + 1e-8)
+        
+        # Jaccard similarity on top activated dimensions
+        top_100_a = set(np.argsort(np.abs(token_a))[-100:])
+        top_100_b = set(np.argsort(np.abs(token_b))[-100:])
+        jaccard_sim = len(top_100_a & top_100_b) / len(top_100_a | top_100_b)
+        
+        comparison_results.append({
+            'Token Position': token_idx + 1,
+            'Cosine Similarity': cos_sim,
+            'Euclidean Distance': eucl_dist,
+            'Magnitude Ratio (A/B)': mag_ratio,
+            'Jaccard Similarity': jaccard_sim,
+            'Magnitude A': mag_a,
+            'Magnitude B': mag_b
+        })
+    
+    # Create DataFrame
+    df = pd.DataFrame(comparison_results)
+    
+    # Print summary statistics
+    print("="*80)
+    print("SUMMARY STATISTICS")
+    print("="*80)
+    print(f"Average Cosine Similarity: {df['Cosine Similarity'].mean():.4f}")
+    print(f"Min Cosine Similarity: {df['Cosine Similarity'].min():.4f} (Token {df['Cosine Similarity'].idxmin() + 1})")
+    print(f"Max Cosine Similarity: {df['Cosine Similarity'].max():.4f} (Token {df['Cosine Similarity'].idxmax() + 1})")
+    print(f"Std Dev Cosine Similarity: {df['Cosine Similarity'].std():.4f}")
+    print(f"\nAverage Euclidean Distance: {df['Euclidean Distance'].mean():.2f}")
+    print(f"Average Jaccard Similarity: {df['Jaccard Similarity'].mean():.4f}")
+    print(f"Average Magnitude Ratio: {df['Magnitude Ratio (A/B)'].mean():.4f}")
+    
+    # Save to CSV with hierarchical folder structure
+    topic_dir = os.path.join(DOMAIN_CONSISTENCY_DIR, model, topic)
+    layer_dir = os.path.join(topic_dir, layer)
+    embed_dir = os.path.join(layer_dir, embed)
+    os.makedirs(embed_dir, exist_ok=True)
+    
+    save_path = os.path.join(embed_dir, "token_by_token_comparison.csv")
+    df.to_csv(save_path, index=False)
+    print(f"\n✓ Detailed results saved to: {save_path}")
+    print("\n")
+    
+    return df
 
-    for i in range(num_tokens):
-        # Take the first i+1 tokens from the last forward pass
-        truncated_tokens = data_b[embed][last_layer][-1][:i+1]
+def compare_c_t_Consistency(model, data: Dict[str, Any], embed: str, data_name: str, topic: str = "default", masking_point: int = 120, layer_num: int = -1):
+    """
+    Compare each token against a center point (mean of tokens up to masking point).
+    
+    This function computes a representative "center" vector as the mean of all tokens
+    up to the masking point, then compares each token against this center using
+    cosine similarity and other metrics.
+    
+    Args:
+        data: Dataset to analyze
+        embed: Key for the activation type to compare (e.g., 'pre_ln2_activations')
+        data_name: Name of the dataset (for output file naming)
+        topic: Topic name for organizing results (default: 'default')
+        masking_point: Token position up to which to compute the center (default: 120)
+        layer_num: Layer index to analyze (default: -1 for last layer)
+    """
+    
+    print("\n" + "="*80)
+    print(f"CENTER-TO-TOKEN CONSISTENCY ANALYSIS: {data_name}")
+    print("="*80)
+    
+    # Get the specified layer
+    all_layers = list(data[embed].keys())
+    layer = all_layers[layer_num]
+    
+    print(f"Analyzing layer: {layer} (index: {layer_num})")
+    
+    # Get token list (after flattening, each element is a single token with shape (1, embed_dim))
+    tokens = data[embed][layer]
+    num_tokens = len(tokens)
+    
+    print(f"Number of tokens: {num_tokens}")
+    print(f"Masking point: {masking_point}")
+    
+    # Compute center vector as mean of tokens up to masking point
+    if num_tokens < masking_point:
+        print(f"⚠️  Warning: Only {num_tokens} tokens available, using all for center computation")
+        masking_point = num_tokens
+    
+    # Collect all tokens up to masking point
+    center_tokens = []
+    for token_idx in range(masking_point):
+        token = tokens[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        center_tokens.append(token)
+    
+    # Compute center as mean
+    center_vector = np.mean(center_tokens, axis=0)  # Shape: (embed_dim,)
+    
+    print(f"Center vector computed from first {masking_point} tokens")
+    
+    # Store center-to-token comparisons
+    comparison_results = []
+    
+    for token_idx in range(num_tokens):
+        # Get individual token embedding
+        token = tokens[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        
+        # Compute cosine similarity with center
+        cos_sim = cosine_similarity(token, center_vector)
+        
+        # Compute Euclidean distance from center
+        eucl_dist = euclidean_distance(token, center_vector)
+        
+        # Compute magnitude ratio
+        token_mag = np.linalg.norm(token)
+        center_mag = np.linalg.norm(center_vector)
+        mag_ratio = token_mag / (center_mag + 1e-8)
+        
+        # Jaccard similarity on top activated dimensions
+        top_100_token = set(np.argsort(np.abs(token))[-100:])
+        top_100_center = set(np.argsort(np.abs(center_vector))[-100:])
+        jaccard_sim = len(top_100_token & top_100_center) / len(top_100_token | top_100_center)
+        
+        # Mark if this token was used in center computation
+        used_in_center = "Yes" if token_idx < masking_point else "No"
+        
+        comparison_results.append({
+            'Token Position': token_idx + 1,
+            'Used in Center': used_in_center,
+            'Cosine Similarity': cos_sim,
+            'Euclidean Distance': eucl_dist,
+            'Magnitude Ratio (Token/Center)': mag_ratio,
+            'Jaccard Similarity': jaccard_sim,
+            'Token Magnitude': token_mag,
+            'Center Magnitude': center_mag
+        })
+    
+    # Create DataFrame
+    df = pd.DataFrame(comparison_results)
+    
+    # Print summary statistics
+    print("="*80)
+    print("SUMMARY STATISTICS")
+    print("="*80)
+    print(f"Average Cosine Similarity (all tokens): {df['Cosine Similarity'].mean():.4f}")
+    print(f"Min Cosine Similarity: {df['Cosine Similarity'].min():.4f} (Token {df['Cosine Similarity'].idxmin() + 1})")
+    print(f"Max Cosine Similarity: {df['Cosine Similarity'].max():.4f} (Token {df['Cosine Similarity'].idxmax() + 1})")
+    print(f"Std Dev Cosine Similarity: {df['Cosine Similarity'].std():.4f}")
+    
+    # Statistics for tokens used in center vs. not used
+    center_tokens_df = df[df['Used in Center'] == 'Yes']
+    non_center_tokens_df = df[df['Used in Center'] == 'No']
+    
+    if len(center_tokens_df) > 0:
+        print(f"\nTokens used in center (first {masking_point}):")
+        print(f"  Average Cosine Similarity: {center_tokens_df['Cosine Similarity'].mean():.4f}")
+    
+    if len(non_center_tokens_df) > 0:
+        print(f"\nTokens NOT used in center (after {masking_point}):")
+        print(f"  Average Cosine Similarity: {non_center_tokens_df['Cosine Similarity'].mean():.4f}")
+    
+    print(f"\nAverage Euclidean Distance: {df['Euclidean Distance'].mean():.2f}")
+    print(f"Average Jaccard Similarity: {df['Jaccard Similarity'].mean():.4f}")
+    print(f"Average Magnitude Ratio: {df['Magnitude Ratio (Token/Center)'].mean():.4f}")
+    
+    # Save to CSV with hierarchical folder structure
+    topic_dir = os.path.join(DOMAIN_CONSISTENCY_DIR, model, topic)
+    layer_dir = os.path.join(topic_dir, layer)
+    embed_dir = os.path.join(layer_dir, embed)
+    os.makedirs(embed_dir, exist_ok=True)
+    
+    save_path = os.path.join(embed_dir, f"center_by_token_{data_name}.csv")
+    df.to_csv(save_path, index=False)
+    print(f"\n✓ Detailed results saved to: {save_path}")
+    print("\n")
+    
+    return df
 
-        # Maintain the list structure: [forward_passes] where each is [tokens][dimensions]
-        modified_data_b = {last_layer: [truncated_tokens]}
-        token_comp, sent_comp = compareInEmbedSpace(modified_data_a, modified_data_b)
-        token_comp_list.append(token_comp)
-        sent_comp_list.append(sent_comp)
+def compare_c_w_Consistency(model, data: Dict[str, Any], embed: str, data_name: str, topic: str = "default", masking_point: int = 120, window_size: int = 10, layer_num: int = -1):
+    """
+    Compare window centers against masked region center.
+    
+    This function groups tokens into windows of specified size and computes a center
+    for each window. Each window center is then compared against the global center
+    (computed from the first masking_point tokens) to track how similarity changes
+    as the topic shifts.
+    
+    Args:
+        model: Model name (for file organization)
+        data: Dataset to analyze
+        embed: Key for the activation type to compare (e.g., 'pre_ln2_activations')
+        data_name: Name of the dataset (for output file naming)
+        topic: Topic name for organizing results (default: 'default')
+        masking_point: Token position up to which to compute the global center (default: 120)
+        window_size: Number of tokens in each window (default: 10)
+        layer_num: Layer index to analyze (default: -1 for last layer)
+    """
+    
+    print("\n" + "="*80)
+    print(f"CENTER-TO-WINDOW CONSISTENCY ANALYSIS: {data_name}")
+    print("="*80)
+    
+    # Get the specified layer
+    all_layers = list(data[embed].keys())
+    layer = all_layers[layer_num]
+    
+    print(f"Analyzing layer: {layer} (index: {layer_num})")
+    
+    # Get token list (after flattening, each element is a single token with shape (1, embed_dim))
+    tokens = data[embed][layer]
+    num_tokens = len(tokens)
+    
+    print(f"Number of tokens: {num_tokens}")
+    print(f"Masking point: {masking_point}")
+    print(f"Window size: {window_size}")
+    
+    # Compute global center vector as mean of tokens up to masking point
+    if num_tokens < masking_point:
+        print(f"⚠️  Warning: Only {num_tokens} tokens available, using all for global center computation")
+        masking_point = num_tokens
+    
+    # Collect all tokens up to masking point for global center
+    global_center_tokens = []
+    for token_idx in range(masking_point):
+        token = tokens[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        global_center_tokens.append(token)
+    
+    # Compute global center as mean
+    global_center = np.mean(global_center_tokens, axis=0)  # Shape: (embed_dim,)
+    
+    print(f"Global center computed from first {masking_point} tokens")
+    
+    # Group all tokens into windows
+    num_windows = num_tokens // window_size
+    if num_tokens % window_size != 0:
+        num_windows += 1  # Include partial window at the end
+    
+    print(f"Total windows: {num_windows}")
+    
+    # Store window-to-global-center comparisons
+    comparison_results = []
+    
+    for window_idx in range(num_windows):
+        window_start = window_idx * window_size
+        window_end = min((window_idx + 1) * window_size, num_tokens)
+        
+        # Collect tokens in this window
+        window_tokens = []
+        for token_idx in range(window_start, window_end):
+            token = tokens[token_idx].squeeze(0)  # Shape: (embed_dim,)
+            window_tokens.append(token)
+        
+        # Compute window center
+        window_center = np.mean(window_tokens, axis=0)  # Shape: (embed_dim,)
+        
+        # Compute metrics between window center and global center
+        cos_sim = cosine_similarity(window_center, global_center)
+        eucl_dist = euclidean_distance(window_center, global_center)
+        
+        # Compute magnitude ratio
+        window_mag = np.linalg.norm(window_center)
+        global_mag = np.linalg.norm(global_center)
+        mag_ratio = window_mag / (global_mag + 1e-8)
+        
+        # Jaccard similarity on top activated dimensions
+        top_100_window = set(np.argsort(np.abs(window_center))[-100:])
+        top_100_global = set(np.argsort(np.abs(global_center))[-100:])
+        jaccard_sim = len(top_100_window & top_100_global) / len(top_100_window | top_100_global)
+        
+        # Check if window overlaps with masked region
+        overlaps_mask = window_start < masking_point
+        
+        comparison_results.append({
+            'Window Index': window_idx + 1,
+            'Token Range': f"{window_start + 1}-{window_end}",
+            'Window Size': len(window_tokens),
+            'Overlaps Mask': "Yes" if overlaps_mask else "No",
+            'Cosine Similarity': cos_sim,
+            'Euclidean Distance': eucl_dist,
+            'Magnitude Ratio (Window/Global)': mag_ratio,
+            'Jaccard Similarity': jaccard_sim,
+            'Window Magnitude': window_mag,
+            'Global Magnitude': global_mag
+        })
+    
+    # Create DataFrame
+    df = pd.DataFrame(comparison_results)
+    
+    # Print summary statistics
+    print("="*80)
+    print("SUMMARY STATISTICS")
+    print("="*80)
+    print(f"Average Cosine Similarity (all windows): {df['Cosine Similarity'].mean():.4f}")
+    print(f"Min Cosine Similarity: {df['Cosine Similarity'].min():.4f} (Window {df['Cosine Similarity'].idxmin() + 1})")
+    print(f"Max Cosine Similarity: {df['Cosine Similarity'].max():.4f} (Window {df['Cosine Similarity'].idxmax() + 1})")
+    print(f"Std Dev Cosine Similarity: {df['Cosine Similarity'].std():.4f}")
+    
+    # Statistics for windows that overlap vs don't overlap with mask
+    overlap_windows_df = df[df['Overlaps Mask'] == 'Yes']
+    non_overlap_windows_df = df[df['Overlaps Mask'] == 'No']
+    
+    if len(overlap_windows_df) > 0:
+        print(f"\nWindows overlapping with mask (before token {masking_point}):")
+        print(f"  Count: {len(overlap_windows_df)}")
+        print(f"  Average Cosine Similarity: {overlap_windows_df['Cosine Similarity'].mean():.4f}")
+    
+    if len(non_overlap_windows_df) > 0:
+        print(f"\nWindows NOT overlapping with mask (after token {masking_point}):")
+        print(f"  Count: {len(non_overlap_windows_df)}")
+        print(f"  Average Cosine Similarity: {non_overlap_windows_df['Cosine Similarity'].mean():.4f}")
+        print(f"  Similarity Range: [{non_overlap_windows_df['Cosine Similarity'].min():.4f}, {non_overlap_windows_df['Cosine Similarity'].max():.4f}]")
+    
+    print(f"\nAverage Euclidean Distance: {df['Euclidean Distance'].mean():.2f}")
+    print(f"Average Jaccard Similarity: {df['Jaccard Similarity'].mean():.4f}")
+    print(f"Average Magnitude Ratio: {df['Magnitude Ratio (Window/Global)'].mean():.4f}")
+    
+    # Save to CSV with hierarchical folder structure
+    topic_dir = os.path.join(DOMAIN_CONSISTENCY_DIR, model, topic)
+    layer_dir = os.path.join(topic_dir, layer)
+    embed_dir = os.path.join(layer_dir, embed)
+    os.makedirs(embed_dir, exist_ok=True)
+    
+    save_path = os.path.join(embed_dir, f"center_by_window_{data_name}.csv")
+    df.to_csv(save_path, index=False)
+    print(f"\n✓ Detailed results saved to: {save_path}")
+    print("\n")
+    
+    return df
 
-    save_path = os.path.join(DOMAIN_CONSISTENCY_DIR, "domain_consistency_analysis.csv")
-    create_consistency_table(token_comp_list, sent_comp_list, save_path, f"Domain Consistency Table")
+def compare_attn_oproj_tokenwise(model, data: Dict[str, Any], embed: str, data_name: str, topic: str = "default", 
+                                   num_reference_tokens: int = 120, layer_num: int = -1):
+    """
+    Compare each token's attention output projection against the average of reference tokens.
+    
+    Computes a reference center vector as the mean of attention output projections from
+    the first `num_reference_tokens` tokens, then compares each token against this center
+    using cosine similarity, euclidean distance, magnitude ratio, and Jaccard similarity.
+    
+    Args:
+        model: Model name (for file organization)
+        data: Dataset to analyze
+        embed: Key for the activation type (e.g., 'post_attn_activations')
+        data_name: Name of the dataset (for output file naming)
+        topic: Topic name for organizing results (default: 'default')
+        num_reference_tokens: Number of initial tokens to compute reference center (default: 120)
+        layer_num: Layer index to analyze (default: -1 for last layer)
+    
+    Returns:
+        DataFrame with token-wise comparison results
+    """
+    
+    print("\n" + "="*80)
+    print(f"ATTENTION OUTPUT PROJECTION TOKEN-WISE ANALYSIS: {data_name}")
+    print("="*80)
+    
+    # Get the specified layer
+    all_layers = list(data[embed].keys())
+    layer = all_layers[layer_num]
+    
+    print(f"Analyzing layer: {layer} (index: {layer_num})")
+    
+    # Get token list (after flattening, each element is a single token with shape (1, embed_dim))
+    tokens = data[embed][layer]
+    num_tokens = len(tokens)
+    
+    print(f"Number of tokens: {num_tokens}")
+    print(f"Number of reference tokens for center: {num_reference_tokens}")
+    
+    # Compute reference center vector as mean of first num_reference_tokens
+    if num_tokens < num_reference_tokens:
+        print(f"⚠️  Warning: Only {num_tokens} tokens available, using all for reference center computation")
+        num_reference_tokens = num_tokens
+    
+    # Collect reference tokens
+    reference_tokens = []
+    for token_idx in range(num_reference_tokens):
+        token = tokens[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        reference_tokens.append(token)
+    
+    # Compute reference center as mean
+    reference_center = np.mean(reference_tokens, axis=0)  # Shape: (embed_dim,)
+    
+    print(f"Reference center computed from first {num_reference_tokens} tokens")
+    
+    # Store token-wise comparisons
+    comparison_results = []
+    
+    for token_idx in range(num_tokens):
+        # Get individual token embedding
+        token = tokens[token_idx].squeeze(0)  # Shape: (embed_dim,)
+        
+        # Compute cosine similarity with reference center
+        cos_sim = cosine_similarity(token, reference_center)
+        
+        # Compute Euclidean distance from reference center
+        eucl_dist = euclidean_distance(token, reference_center)
+        
+        # Compute magnitude ratio
+        token_mag = np.linalg.norm(token)
+        center_mag = np.linalg.norm(reference_center)
+        mag_ratio = token_mag / (center_mag + 1e-8)
+        
+        # Jaccard similarity on top activated dimensions
+        top_100_token = set(np.argsort(np.abs(token))[-100:])
+        top_100_center = set(np.argsort(np.abs(reference_center))[-100:])
+        jaccard_sim = len(top_100_token & top_100_center) / len(top_100_token | top_100_center)
+        
+        # Mark if this token was used in reference center computation
+        used_in_reference = "Yes" if token_idx < num_reference_tokens else "No"
+        
+        comparison_results.append({
+            'Token Position': token_idx + 1,
+            'Used in Reference': used_in_reference,
+            'Cosine Similarity': cos_sim,
+            'Euclidean Distance': eucl_dist,
+            'Magnitude Ratio (Token/Reference)': mag_ratio,
+            'Jaccard Similarity': jaccard_sim,
+            'Token Magnitude': token_mag,
+            'Reference Magnitude': center_mag
+        })
+    
+    # Create DataFrame
+    df = pd.DataFrame(comparison_results)
+    
+    # Print summary statistics
+    print("="*80)
+    print("SUMMARY STATISTICS")
+    print("="*80)
+    print(f"Average Cosine Similarity (all tokens): {df['Cosine Similarity'].mean():.4f}")
+    print(f"Min Cosine Similarity: {df['Cosine Similarity'].min():.4f} (Token {df['Cosine Similarity'].idxmin() + 1})")
+    print(f"Max Cosine Similarity: {df['Cosine Similarity'].max():.4f} (Token {df['Cosine Similarity'].idxmax() + 1})")
+    print(f"Std Dev Cosine Similarity: {df['Cosine Similarity'].std():.4f}")
+    
+    # Statistics for tokens used in reference vs. not used
+    reference_tokens_df = df[df['Used in Reference'] == 'Yes']
+    non_reference_tokens_df = df[df['Used in Reference'] == 'No']
+    
+    if len(reference_tokens_df) > 0:
+        print(f"\nTokens used in reference (first {num_reference_tokens}):")
+        print(f"  Average Cosine Similarity: {reference_tokens_df['Cosine Similarity'].mean():.4f}")
+    
+    if len(non_reference_tokens_df) > 0:
+        print(f"\nTokens NOT used in reference (after {num_reference_tokens}):")
+        print(f"  Average Cosine Similarity: {non_reference_tokens_df['Cosine Similarity'].mean():.4f}")
+    
+    print(f"\nAverage Euclidean Distance: {df['Euclidean Distance'].mean():.2f}")
+    print(f"Average Jaccard Similarity: {df['Jaccard Similarity'].mean():.4f}")
+    print(f"Average Magnitude Ratio: {df['Magnitude Ratio (Token/Reference)'].mean():.4f}")
+
+    cosine_sim_token = cosine_similarity(tokens[2].squeeze(0), tokens[21].squeeze(0))
+    cosine_sim_token_2 = cosine_similarity(tokens[3].squeeze(0), tokens[21].squeeze(0))
+    cosine_sim_token_3 = cosine_similarity(tokens[3].squeeze(0), tokens[2].squeeze(0))
+
+    print(f"\nCosine Similarity between token 3 and token 22: {cosine_sim_token:.4f}")
+    print(f"Cosine Similarity between token 4 and token 22: {cosine_sim_token_2:.4f}")
+    print(f"Cosine Similarity between token 4 and token 3: {cosine_sim_token_3:.4f}")
+    # Save to CSV with hierarchical folder structure
+    topic_dir = os.path.join(DOMAIN_CONSISTENCY_DIR, model, topic)
+    layer_dir = os.path.join(topic_dir, layer)
+    embed_dir = os.path.join(layer_dir, embed)
+    os.makedirs(embed_dir, exist_ok=True)
+    
+    save_path = os.path.join(embed_dir, f"attn_oproj_tokenwise_{data_name}.csv")
+    df.to_csv(save_path, index=False)
+    print(f"\n✓ Detailed results saved to: {save_path}")
+    print("\n")
+    
+    return df
 
 def create_comparison_table_mlp(results: list, path_to_save: str, dataset_name: str):
     """Create a formatted table for MLP impact results"""
@@ -893,6 +1423,463 @@ def main_v2():
     print("="*80)
     print(f"Results saved to: {output_dir}")
 
+def main_domain_consistency():
+    # Load paired datasets for domain consistency analysis
+    model = "meta-llama_Llama-3.2-3B-Instruct"
+    topic = "EV_ITALY"
+    prompt_token = 92
 
+    unpruned_file = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model,
+        "EV_ITALY_0.0_prune_rel_gen700", 
+        "activations.pkl"
+    )
+    
+    pruned_file = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_0 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune50_rel_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_1 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel200_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_2 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel300_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_3 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel400_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_4 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel500_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_5 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel600_gen700", 
+        "activations.pkl"
+    )
+
+    pruned_file_6 = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune200_rel_gen700", 
+        "activations.pkl"
+    )
+
+    topic_dir = os.path.join(DOMAIN_CONSISTENCY_DIR, model, topic)
+    os.makedirs(topic_dir, exist_ok=True)
+    
+    paths_file = os.path.join(topic_dir, "source_paths.txt")
+    
+    with open(paths_file, 'w') as f:
+        f.write("Source Data Paths\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"Unpruned: {unpruned_file}\n")
+        f.write(f"Pruned:   {pruned_file}\n")
+    
+    print(f"Source paths saved to: {paths_file}")
+
+    # pruned_file_2 = os.path.join(
+    #     RESULTS_DIR, 
+    #     "knowledge_drift", 
+    #     model, 
+    #     "custom_50.0_prunes100_rel200_EV_ITALY", 
+    #     "activations.pkl"
+    # )
+
+    # pruned_file_3 = os.path.join(
+    #     RESULTS_DIR, 
+    #     "knowledge_drift", 
+    #     model, 
+    #     "custom_50.0_prunes100_rel300_EV_ITALY", 
+    #     "activations.pkl"
+    # )
+    
+    if not os.path.exists(unpruned_file) or not os.path.exists(pruned_file):
+        print(f"❌ One or both dataset files not found.")
+        return
+    
+    print(f"Loading Dataset A from: {unpruned_file}")
+    data_unpruned = data_loader(unpruned_file)
+    print("✓ Dataset A loaded successfully\n")
+    
+    print(f"Loading Dataset B from: {pruned_file_0}")
+    data_pruned_50 = data_loader(pruned_file_0)
+    print("✓ Dataset B loaded successfully\n")
+
+    print(f"Loading Dataset B from: {pruned_file}")
+    data_pruned_100 = data_loader(pruned_file)
+    print("✓ Dataset B loaded successfully\n")
+
+    print(f"Loading Dataset C from: {pruned_file_1}")
+    data_pruned_100_rel200 = data_loader(pruned_file_1)
+    print("✓ Dataset C loaded successfully\n")
+
+    print(f"Loading Dataset D from: {pruned_file_2}")
+    data_pruned_100_rel300 = data_loader(pruned_file_2)
+    print("✓ Dataset D loaded successfully\n")
+
+    print(f"Loading Dataset B from: {pruned_file_3}")
+    data_pruned_100_rel400 = data_loader(pruned_file_3)
+    print("✓ Dataset B loaded successfully\n")
+
+    print(f"Loading Dataset C from: {pruned_file_4}")
+    data_pruned_100_rel500 = data_loader(pruned_file_4)
+    print("✓ Dataset C loaded successfully\n")
+
+    print(f"Loading Dataset D from: {pruned_file_5}")
+    data_pruned_100_rel600 = data_loader(pruned_file_5)
+    print("✓ Dataset D loaded successfully\n")
+
+    print(f"Loading Dataset B from: {pruned_file_6}")
+    data_pruned_200 = data_loader(pruned_file_6)
+    print("✓ Dataset B loaded successfully\n")
+    
+    print("\n" + "="*80)
+    print("BEFORE FLATTENING")
+    print("="*80)
+    print(f"Type: {type(data_unpruned['pre_ln2_activations'])}")
+    print(f"Layers: {list(data_unpruned['pre_ln2_activations'].keys())[:5]}...")
+    print(f"Layer 0 list length: {len(data_unpruned['pre_ln2_activations']['layer_0'])}")
+    print(f"Layer 0, element 0 shape: {data_unpruned['pre_ln2_activations']['layer_0'][0].shape}")
+    print(f"Layer 0, element 1 shape: {data_unpruned['pre_ln2_activations']['layer_0'][1].shape}")
+    print(f"Layer 0, element -1 shape: {data_unpruned['pre_ln2_activations']['layer_0'][-1].shape}")
+    
+    # Flatten activation structures
+    print("\n" + "="*80)
+    print("FLATTENING ACTIVATION STRUCTURES")
+    print("="*80)
+    data_unpruned_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_unpruned.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_50_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_50.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_100_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_100.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_100_rel200_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_100_rel200.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_100_rel300_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_100_rel300.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_100_rel400_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_100_rel400.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_100_rel500_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_100_rel500.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_100_rel600_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_100_rel600.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_200_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned_200.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    
+    print("\n" + "="*80)
+    print("AFTER FLATTENING")
+    print("="*80)
+    print(f"Layer 0 list length: {len(data_unpruned_flattened['pre_ln2_activations']['layer_0'])}")
+    print(f"Layer 0, element 0 shape: {data_unpruned_flattened['pre_ln2_activations']['layer_0'][0].shape}")
+    print(f"Layer 0, element 10 shape: {data_unpruned_flattened['pre_ln2_activations']['layer_0'][10].shape}")
+    print(f"Layer 0, element -1 shape: {data_unpruned_flattened['pre_ln2_activations']['layer_0'][-1].shape}")
+    print(f"✓ All elements now have shape (1, embed_dim)")
+    
+    # Update data dictionaries with flattened versions
+    data_unpruned.update(data_unpruned_flattened)
+    data_pruned_50.update(data_pruned_50_flattened)
+    data_pruned_100.update(data_pruned_100_flattened)
+    data_pruned_100_rel200.update(data_pruned_100_rel200_flattened)
+    data_pruned_100_rel300.update(data_pruned_100_rel300_flattened)
+    data_pruned_100_rel400.update(data_pruned_100_rel400_flattened)
+    data_pruned_100_rel500.update(data_pruned_100_rel500_flattened)
+    data_pruned_100_rel600.update(data_pruned_100_rel600_flattened)
+    data_pruned_200.update(data_pruned_200_flattened)
+    
+    # data_c.update(data_c_flattened)
+    # data_d.update(data_d_flattened)
+# ------------------------------------------------------------------------
+    # CENTER-TO-TOKEN ANALYSIS
+# ------------------------------------------------------------------------
+    print("\n" + "="*80)
+    print("ANALYZING DATA_UNPRUNED (Center-to-Token)")
+    print("="*80)
+    compare_c_t_Consistency(model, data_unpruned, embed="pre_ln2_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_unpruned, embed="pre_ln2_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_unpruned, embed="pre_ln2_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, layer_num=-1)
+    compare_c_t_Consistency(model, data_unpruned, embed="post_attn_oproj_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_unpruned, embed="post_attn_oproj_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_unpruned, embed="post_attn_oproj_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, layer_num=-1)
+
+    print("\n" + "="*80)
+    print("ANALYZING DATA_PRUNED_50 (Center-to-Token)")
+    print("="*80)
+    compare_c_t_Consistency(model, data_pruned_50, embed="pre_ln2_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_pruned_50, embed="pre_ln2_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_pruned_50, embed="pre_ln2_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, layer_num=-1)
+    compare_c_t_Consistency(model, data_pruned_50, embed="post_attn_oproj_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_pruned_50, embed="post_attn_oproj_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_pruned_50, embed="post_attn_oproj_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, layer_num=-1)
+
+    print("\n" + "="*80)
+    print("ANALYZING DATA_PRUNED_100 (Center-to-Token)")
+    print("="*80)
+    compare_c_t_Consistency(model, data_pruned_100, embed="pre_ln2_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_pruned_100, embed="pre_ln2_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_pruned_100, embed="pre_ln2_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, layer_num=-1)
+    compare_c_t_Consistency(model, data_pruned_100, embed="post_attn_oproj_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_pruned_100, embed="post_attn_oproj_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_pruned_100, embed="post_attn_oproj_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, layer_num=-1)
+
+    print("\n" + "="*80)
+    print("ANALYZING DATA_PRUNED_100_REL200 (Center-to-Token)")
+    print("="*80)
+    compare_c_t_Consistency(model, data_pruned_100_rel200, embed="pre_ln2_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_pruned_100_rel200, embed="pre_ln2_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_pruned_100_rel200, embed="pre_ln2_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, layer_num=-1)
+    compare_c_t_Consistency(model, data_pruned_100_rel200, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, layer_num=0)
+    compare_c_t_Consistency(model, data_pruned_100_rel200, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, layer_num=17)
+    compare_c_t_Consistency(model, data_pruned_100_rel200, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, layer_num=-1)
+
+# ------------------------------------------------------------------------
+    # CENTER-TO-WINDOW ANALYSIS
+# ------------------------------------------------------------------------
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_A (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_unpruned, embed="pre_ln2_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_unpruned, embed="pre_ln2_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_unpruned, embed="pre_ln2_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    # # compare_c_w_Consistency(model, data_unpruned, embed="post_layer_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+    # compare_c_w_Consistency(model, data_unpruned, embed="post_attn_oproj_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_unpruned, embed="post_attn_oproj_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_unpruned, embed="post_attn_oproj_activations", data_name="data_unpruned", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_B (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_50, embed="pre_ln2_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_50, embed="pre_ln2_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_pruned_50, embed="pre_ln2_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=-1)
+
+    # # compare_c_w_Consistency(model, data_pruned_50, embed="post_layer_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=-1)
+    # compare_c_w_Consistency(model, data_pruned_50, embed="post_attn_oproj_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=-1)
+    # compare_c_w_Consistency(model, data_pruned_50, embed="post_attn_oproj_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_50, embed="post_attn_oproj_activations", data_name="data_pruned_50", topic=topic, masking_point=50+prompt_token, window_size=10, layer_num=17)
+
+    # # Run center-to-window analysis for data_b
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_B (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_100, embed="pre_ln2_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100, embed="pre_ln2_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_pruned_100, embed="pre_ln2_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+    # # compare_c_w_Consistency(model, data_pruned_100, embed="post_layer_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+    # compare_c_w_Consistency(model, data_pruned_100, embed="post_attn_oproj_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100, embed="post_attn_oproj_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_pruned_100, embed="post_attn_oproj_activations", data_name="data_pruned_100", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+    # print("ANALYZING DATA_C (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="pre_ln2_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="pre_ln2_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="pre_ln2_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    # # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="post_layer_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+    # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    # compare_c_w_Consistency(model, data_pruned_100_rel200, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel200", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_D (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_100_rel300, embed="pre_ln2_activations", data_name="data_pruned_100_rel300", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel300, embed="pre_ln2_activations", data_name="data_pruned_100_rel300", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+
+    # # compare_c_w_Consistency(model, data_pruned_100_rel300, embed="post_layer_activations", data_name="data_pruned_100_rel300", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    # compare_c_w_Consistency(model, data_pruned_100_rel300, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel300", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel300, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel300", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_E (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_100_rel400, embed="pre_ln2_activations", data_name="data_pruned_100_rel400", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel400, embed="pre_ln2_activations", data_name="data_pruned_100_rel400", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+
+    # # compare_c_w_Consistency(model, data_pruned_100_rel400, embed="post_layer_activations", data_name="data_pruned_100_rel400", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    # compare_c_w_Consistency(model, data_pruned_100_rel400, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel400", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel400, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel400", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_F (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_100_rel500, embed="pre_ln2_activations", data_name="data_pruned_100_rel500", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel500, embed="pre_ln2_activations", data_name="data_pruned_100_rel500", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+
+    # # compare_c_w_Consistency(model, data_pruned_100_rel500, embed="post_layer_activations", data_name="data_pruned_100_rel500", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    # compare_c_w_Consistency(model, data_pruned_100_rel500, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel500", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_100_rel500, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel500", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=17)
+    
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_G (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_100_rel600, embed="pre_ln2_activations", data_name="data_pruned_100_rel600", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+
+    # # compare_c_w_Consistency(model, data_pruned_100_rel600, embed="post_layer_activations", data_name="data_pruned_100_rel600", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    # compare_c_w_Consistency(model, data_pruned_100_rel600, embed="post_attn_oproj_activations", data_name="data_pruned_100_rel600", topic=topic, masking_point=100+prompt_token, window_size=10, layer_num=-1)
+    
+    # print("\n" + "="*80)
+    # print("ANALYZING DATA_G (Center-to-Window)")
+    # print("="*80)
+    # compare_c_w_Consistency(model, data_pruned_200, embed="pre_ln2_activations", data_name="data_pruned_200", topic=topic, masking_point=200+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_200, embed="pre_ln2_activations", data_name="data_pruned_200", topic=topic, masking_point=200+prompt_token, window_size=10, layer_num=17)
+
+    # # compare_c_w_Consistency(model, data_pruned_200, embed="post_layer_activations", data_name="data_pruned_200", topic=topic, masking_point=200+prompt_token, window_size=10, layer_num=-1)
+
+    # compare_c_w_Consistency(model, data_pruned_200, embed="post_attn_oproj_activations", data_name="data_pruned_200", topic=topic, masking_point=200+prompt_token, window_size=10, layer_num=0)
+    # compare_c_w_Consistency(model, data_pruned_200, embed="post_attn_oproj_activations", data_name="data_pruned_200", topic=topic, masking_point=200+prompt_token, window_size=10, layer_num=17)
+
+def main_attn_study():
+    model = "meta-llama_Llama-3.2-3B-Instruct"
+    topic = "EV_ITALY_short"
+    prompt_token = 22
+
+    unpruned_file = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model,
+        "EV_ITALY_0.0_prune_rel_gen700", 
+        "activations.pkl"
+    )
+    
+    pruned_file = os.path.join(
+        RESULTS_DIR, 
+        "knowledge_drift", 
+        model, 
+        "EV_ITALY_50.0_prune100_rel_gen700", 
+        "activations.pkl"
+    )
+
+
+    topic_dir = os.path.join(DOMAIN_CONSISTENCY_DIR, model, topic)
+    os.makedirs(topic_dir, exist_ok=True)
+    
+    paths_file = os.path.join(topic_dir, "source_paths.txt")
+    
+    with open(paths_file, 'w') as f:
+        f.write("Source Data Paths\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"Unpruned: {unpruned_file}\n")
+        f.write(f"Pruned:   {pruned_file}\n")
+    
+    print(f"Source paths saved to: {paths_file}")
+
+    
+    if not os.path.exists(unpruned_file) or not os.path.exists(pruned_file):
+        print(f"❌ One or both dataset files not found.")
+        return
+    
+    print(f"Loading Dataset A from: {unpruned_file}")
+    data_unpruned = data_loader(unpruned_file)
+    print("✓ Dataset A loaded successfully\n")
+    
+    print(f"Loading Dataset B from: {pruned_file}")
+    data_pruned = data_loader(pruned_file)
+    print("✓ Dataset B loaded successfully\n")
+
+    data_unpruned_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_unpruned.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    data_pruned_flattened = {
+        key: flatten_activation_structure(activations) 
+        for key, activations in data_pruned.items() 
+        if isinstance(activations, dict) and any('layer' in k for k in activations.keys())
+    }
+    
+    # Update data dictionaries with flattened versions
+    data_unpruned.update(data_unpruned_flattened)
+    data_pruned.update(data_pruned_flattened)
+
+    # Save the token wise attn_oproj embedding  cosine euclidean dist, etc etc with the average attn_oproj for the specified number of tokens. Look at C_W_Consistency function for reference
+    print("\n" + "="*80)
+    print("ANALYZING UNPRUNED DATA (Attention Output Projection Token-wise)")
+    print("="*80)
+    compare_attn_oproj_tokenwise(model, data_unpruned, embed="post_attn_oproj_activations", data_name="unpruned_1", topic=topic, num_reference_tokens=1, layer_num=-1)
+    
+    print("\n" + "="*80)
+    print("ANALYZING PRUNED DATA (Attention Output Projection Token-wise)")
+    print("="*80)
+    compare_attn_oproj_tokenwise(model, data_pruned, embed="post_attn_oproj_activations", data_name="pruned_100_1", topic=topic, num_reference_tokens=1, layer_num=-1)
+    
 if __name__ == '__main__':
-    main_v2()
+    #main_v2()
+
+    main_domain_consistency()
+
+    #main_attn_study()

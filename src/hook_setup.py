@@ -2,7 +2,8 @@ import torch
 import gc
 
 def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activations, 
-                     post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
+                     post_attn_weights, post_attn_activations, post_attn_oproj_activations,
+                     pre_ln2_activations, pre_mlp1_activations,
                      pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
                      mlp2_forward_proxy, embedding_weights, save_activations=False):
     """Setup hooks for GPT2 architecture."""
@@ -114,7 +115,8 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
     return hooks
 
 def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activations, 
-                      post_attn_activations, pre_ln2_activations, pre_mlp1_activations,
+                      post_attn_weights, post_attn_activations, post_attn_oproj_activations,
+                      pre_ln2_activations, pre_mlp1_activations,
                       pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
                       mlp2_forward_proxy, embedding_weights, mlp2_weights, save_activations=False):
     """Setup hooks for LLaMA architecture."""
@@ -124,13 +126,22 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
         def hook_fn(module, inp, outp):
             if isinstance(outp, tuple):
                 activation_tensor = outp[0]
+                # Capture attention weights if available (from self_attn)
+                if len(outp) > 1 and ("attn" in sublayer_name or "self_attn" in sublayer_name):
+                    if save_activations:
+                        attn_weights = outp[1]  # Shape: (batch, num_heads, seq_len, seq_len) or None
+                        # Only process if attn_weights is not None
+                        if attn_weights is not None:
+                            # Average over batch dimension for attention weights
+                            if len(attn_weights.shape) == 4:
+                                attn_weights_magnitude = attn_weights.mean(dim=0)  # (num_heads, seq_len, seq_len)
+                            else:
+                                attn_weights_magnitude = attn_weights
+                            post_attn_weights[layer_name].append(attn_weights_magnitude.detach().cpu().numpy())
             elif isinstance(outp, torch.Tensor):
                 activation_tensor = outp
             else:
                 activation_tensor = outp
-            
-            # TODO: Fix this .mean operation because we are sending just one batch, it's used for crushing the batch dimension.
-            # the promptInEmbedSpace.py function uses the 2d activation_magnitude tensor so it has to be edited to accomodate 3d tensors.
             
             # Average over batch dimension, keep token dimension
             if len(activation_tensor.shape) == 3:
@@ -142,12 +153,15 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
             if "mlp_down" in sublayer_name:
                 neuronDefuser.calculate_mlp_impact(layer_name, activation_magnitude.detach().cpu().numpy())
             
+            if "attn" in sublayer_name or "self_attn" in sublayer_name:
+                neuronDefuser.calculate_knowledge_drift(layer_name, activation_magnitude)
             # Only save activations if flag is enabled
             if not save_activations:
                 return
 
             if "attn" in sublayer_name or "self_attn" in sublayer_name:
-                post_attn_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
+                # Output from self_attn is AFTER o_proj
+                post_attn_oproj_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "mlp_down" in sublayer_name:
                 post_mlp2_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "layer" in sublayer_name:
@@ -182,15 +196,11 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 else:
                     kwargs['hidden_states'] = modified_tensor
                     return (args, kwargs)
-            
-            # TODO: Fix this .mean operation because we are sending just one batch, it's used for crushing the batch dimension.
-            # the promptInEmbedSpace.py function uses the 2d activation_magnitude tensor so it has to be edited to accomodate 3d tensors.
-            
+
             activation_magnitude = inp_tensor
+            # Average over batch dimension if needed
             if len(inp_tensor.shape) == 3:
                 activation_magnitude = inp_tensor.mean(dim=0)
-            else:
-                activation_magnitude = inp_tensor
 
             # CRITICAL: Cache pre-MLP BEFORE save_activations check (needed for adaptive pruning)
             if "post_attention_layernorm" in sublayer_name:
@@ -204,7 +214,11 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 pre_ln1_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "post_attention_layernorm" in sublayer_name:
                 pre_ln2_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
+            elif "o_proj" in sublayer_name:
+                # Input to o_proj is the attention output BEFORE o_proj (attn_weights @ values)
+                post_attn_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "self_attn" in sublayer_name:
+                # Input to self_attn (before Q,K,V projections)
                 pre_attn_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "mlp_gate" in sublayer_name:
                 pre_mlp1_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
@@ -214,6 +228,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
     for i, layer in enumerate(model.model.layers):
         input_layernorm = layer.input_layernorm
         self_attn = layer.self_attn
+        o_proj = layer.self_attn.o_proj
         post_attention_layernorm = layer.post_attention_layernorm
         mlp = layer.mlp
         
@@ -228,6 +243,14 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
             create_hook_pre_with_kwargs(f"layer_{i}", "self_attn"), 
             with_kwargs=True
         )
+        
+        # Hook for o_proj pre-hook to capture attention output BEFORE o_proj
+        hook_attn_oproj = o_proj.register_forward_pre_hook(
+            create_hook_pre_with_kwargs(f"layer_{i}", "o_proj"), 
+            with_kwargs=True
+        )
+        
+        # Hook for self_attn post-hook to capture attention weights and final output
         hook_attn_post = self_attn.register_forward_hook(create_hook_post(f"layer_{i}", "self_attn"))
         
         # Hook for post_attention_layernorm (equivalent to ln_2)
@@ -236,7 +259,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
             with_kwargs=True
         )
         
-        hooks.extend([hook_ln1, hook_attn, hook_attn_post, hook_ln2])
+        hooks.extend([hook_ln1, hook_attn, hook_attn_oproj, hook_attn_post, hook_ln2])
 
         # LLaMA MLP has gate_proj, up_proj, and down_proj
         # gate_proj corresponds to the first transformation (like c_fc)

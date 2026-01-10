@@ -18,24 +18,67 @@
 DEVICE=0                  # CUDA device ID
 
 # Model configuration
-MODEL="meta-llama/Llama-2-7b-hf" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
+#MODEL="meta-llama/Llama-2-7b-hf" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
+MODEL="meta-llama/Llama-3.2-3B-Instruct"
 CACHE_DIR="llm_weights"
 
 # Prompt configuration
-PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="marketing"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_TYPE="custom"           # Options: "custom", "mmlu"
+PROMPT_SUBJECT=""           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH=4000               # Leave empty for None (no prompt length limit)
+# CUSTOM_PROMPT_TEXT="Technology Review: March 2024
+
+# Today I learned about two fascinating topics: GPUs and ice cream.
+
+# First, let me explain GPUs. Graphics Processing Units are"       # Custom prompt text (optional, overrides PROMPT_SUBJECT)
+
+
+# CUSTOM_PROMPT_TEXT="Follow these instructions carefully:
+
+# Step 1: Write a paragraph explaining GPUs (Graphics Processing Units). Include:
+# - What they are
+# - How they differ from CPUs
+# - What they're used for
+# - Their architecture
+
+# Step 2: After finishing the GPU explanation, write a completely separate paragraph about ice cream flavors. Include:
+# - Popular flavors
+# - What makes each flavor unique
+# - Regional preferences
+
+# Begin now with Step 1."
+
+CUSTOM_PROMPT_TEXT="Follow these instructions carefully:
+
+Step 1: Write a paragraph explaining electric cars. Include:
+- What they are
+- How they differ from gasoline vehicles
+- How their motors and batteries work
+- Why they are considered environmentally friendly
+
+Step 2: After finishing the electric car explanation, write a completely separate paragraph about Italian cuisine. Include:
+- Popular dishes
+- Key ingredients
+- Regional differences in cooking styles
+
+Begin now with Step 1."
+
+
+# CUSTOM_PROMPT_TEXT="Describe how electric cars are reshaping modern cities, and what a visitor might experience when spending time in Italy."
+
+PROMPT_LENGTH=""               # Leave empty for None (no prompt length limit)
+
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
 LAYER_TOPK="all:auto"
-MASKING_STEP=0
-GENERATION=0
+MASKING_STEP=100
+RELEASE_STEP=""             # Step at which to release masked neurons (leave empty for None)
+GENERATION=700
 EMA_DECAY=""
 RANKING_METHOD="max"
 PRUNE_STRATEGY="topk"
-TOTAL_PRUNE_PERCENT=60.0
+TOTAL_PRUNE_PERCENT=50.0
 
 ## Comment these out when pruning.
 # LAYER_TOPK=""
@@ -46,10 +89,10 @@ TOTAL_PRUNE_PERCENT=60.0
 # PRUNE_STRATEGY="auto"           # Pruning strategy - topk, auto
 
 # Activation saving configuration
-SAVE_ACTIVATIONS=false       # Set to true to save activations (uses more memory)
+SAVE_ACTIVATIONS=false    # Set to true to save activations (uses more memory)
 
 # Evaluation configuration - Perplexity
-EVAL_PERPLEXITY=true           # Set to true to enable perplexity evaluation
+EVAL_PERPLEXITY=false           # Set to true to enable perplexity evaluation
 PPL_DATASETS="mmlu"          # Options: "custom", "mmlu" (space-separated)
 PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"             # Subjects for perplexity evaluation (space-separated)
 #PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"             # Subjects for perplexity evaluation (space-separated)
@@ -58,7 +101,7 @@ PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high
 PPL_MAX_SAMPLES=200             # Max samples for perplexity eval (leave empty for all)
 
 # Evaluation configuration - MMLU
-EVAL_MMLU=true             # Set to true to enable MMLU evaluation
+EVAL_MMLU=false             # Set to true to enable MMLU evaluation
 MMLU_DATASETS="college_computer_science high_school_world_history marketing philosophy"
 #MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"
                                # MMLU subjects to evaluate (space-separated)
@@ -71,8 +114,8 @@ GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_ea
 GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-EXPERIMENT_NAME=${PROMPT_TYPE}_${PROMPT_SUBJECT}_${TOTAL_PRUNE_PERCENT}prune
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/wanda_comparison"
+EXPERIMENT_NAME=EV_ITALY_CALC_${TOTAL_PRUNE_PERCENT}_prune${MASKING_STEP}_rel${RELEASE_STEP}_gen${GENERATION}
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/knowledge_drift"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
@@ -107,9 +150,11 @@ print_config() {
     echo "Model: $MODEL"
     echo "Prompt Type: $PROMPT_TYPE"
     echo "Prompt Subject: $PROMPT_SUBJECT"
+    echo "Custom Prompt Text: ${CUSTOM_PROMPT_TEXT:-None}"
     echo "Prompt Length: ${PROMPT_LENGTH:-None}"
     echo "Layer TopK: ${LAYER_TOPK:-None}"
     echo "Masking Step: ${MASKING_STEP:-None}"
+    echo "Release Step: ${RELEASE_STEP:-None}"
     echo "EMA Decay: ${EMA_DECAY:-None (L2 norm)}"
     echo "Ranking Method: $RANKING_METHOD"
     echo "Prune Strategy: $PRUNE_STRATEGY"
@@ -187,6 +232,12 @@ else
     MASKING_STEP_JSON="$MASKING_STEP"
 fi
 
+if [ -z "$RELEASE_STEP" ]; then
+    RELEASE_STEP_JSON="null"
+else
+    RELEASE_STEP_JSON="$RELEASE_STEP"
+fi
+
 if [ -z "$EMA_DECAY" ]; then
     EMA_DECAY_JSON="null"
 else
@@ -204,11 +255,13 @@ cat > "$CONFIG_LOG" << EOF
   "prompt": {
     "type": "$PROMPT_TYPE",
     "subject": "$PROMPT_SUBJECT",
+    "custom_text": "$CUSTOM_PROMPT_TEXT",
     "length": $PROMPT_LENGTH_JSON
   },
   "pruning": {
     "layer_topk": $LAYER_TOPK_JSON,
     "masking_step": $MASKING_STEP_JSON,
+    "release_step": $RELEASE_STEP_JSON,
     "ema_decay": $EMA_DECAY_JSON,
     "ranking_method": "$RANKING_METHOD",
     "prune_strategy": "$PRUNE_STRATEGY",
@@ -247,8 +300,19 @@ echo "Configuration saved to: $CONFIG_LOG" | tee -a "$TIMING_LOG"
 CMD="CUDA_VISIBLE_DEVICES=$DEVICE python -u dynamicPrune.py \
     --model \"$MODEL\" \
     --cache_dir \"$CACHE_DIR\" \
-    --prompt_type \"$PROMPT_TYPE\" \
+    --prompt_type \"$PROMPT_TYPE\""
+
+# Add prompt_subject only if it's set (not empty)
+if [ -n "$PROMPT_SUBJECT" ]; then
+    CMD="$CMD \
     --prompt_subject \"$PROMPT_SUBJECT\""
+fi
+
+# Add custom_prompt_text only if it's set (not empty)
+if [ -n "$CUSTOM_PROMPT_TEXT" ]; then
+    CMD="$CMD \
+    --custom_prompt_text \"$CUSTOM_PROMPT_TEXT\""
+fi
 
 # Add prompt_length only if it's set (not empty)
 if [ -n "$PROMPT_LENGTH" ]; then
@@ -272,6 +336,12 @@ fi
 if [ -n "$MASKING_STEP" ]; then
     CMD="$CMD \
     --maskingStep $MASKING_STEP"
+fi
+
+# Add releaseStep only if set
+if [ -n "$RELEASE_STEP" ]; then
+    CMD="$CMD \
+    --releaseStep $RELEASE_STEP"
 fi
 
 # Add ema_decay only if set

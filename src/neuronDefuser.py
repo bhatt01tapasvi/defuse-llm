@@ -12,10 +12,11 @@ PRUNE_DIR = os.path.join(RESULTS_DIR, "pruneNeurons")
 #MAX_FORWARD_PROXY = os.path.join(PRUNING_DIR, "maxProxy")
 
 class NeuronDefuser:
-    def __init__(self, maskingStep: int=0, per_layer_topk: dict=None, ema_decay: float=None, ranking_method: str='combined', prune_strategy: str='topk', total_prune_percent: float=50.0, device: str='cuda'):
+    def __init__(self, maskingStep: int=0, releaseStep: int=None, per_layer_topk: dict=None, ema_decay: float=None, ranking_method: str='combined', prune_strategy: str='topk', total_prune_percent: float=50.0, device: str='cuda'):
         """
         Args:
             maskingStep: Step at which to start applying masks
+            releaseStep: Step at which to release masked neurons
             per_layer_topk: Dict mapping layer_name -> topK value. 
                            Use -1 to skip pruning for that layer.
             ema_decay: Decay factor for EMA (0.0 to 1.0)
@@ -26,6 +27,7 @@ class NeuronDefuser:
         """
         self.currIteration = 0
         self.maskingStep = maskingStep
+        self.releaseStep = releaseStep
         self.device = device
         self.ema_decay = ema_decay  # Decay factor for EMA
         self.ranking_method = ranking_method
@@ -41,6 +43,14 @@ class NeuronDefuser:
         self.pre_mlp_cache = {}   # Temporary storage per layer
         self.mlp_impact_history = {}  # Accumulated metrics per layer
         #   Format: {layer_name: {'cosine': [values], 'delta_ratio': [values]}}
+
+        self.post_attn_oproj_cache = {}  # Temporary storage for post-attention output projection activations
+        self.oproj_counter = {}  # Per-layer counter for post-attention tracking
+        self.oproj_max_count = 10  # Example max count, adjust as needed
+        self.attention_mean_cosine = {}  # Store mean (μ) of baseline Gaussian per layer
+        self.attention_std_cosine = {}  # Store std dev (σ) of baseline Gaussian per layer
+        self.attention_min_cosine = {}  # Store min cosine similarities per layer
+        self.attention_max_cosine = {}  # Store max cosine similarities per layer
 
         self.forward_proxies_max = {}  # Store max forward proxies per layer
         self.forward_proxies_mean = {}  # Store mean forward proxies per layer
@@ -151,11 +161,25 @@ class NeuronDefuser:
         Or we process all the tokens in one go just before we have to start masking and then judge what we need and what we don't.
         For now, I am implementing the first approach.
         """
-
-        if self.maskingStep is None:
-            return activations3  # No masking step defined, return unchanged
         
-        if self.currIteration > self.maskingStep:
+        # No masking step defined or past release step - return unchanged
+        if self.maskingStep is None:
+            return activations3
+        
+        # Check if this is the last layer (for counter increment)
+        is_last_layer = (layer_name == list(self.forward_proxies_max.keys())[-1])
+        
+        #Release step means no more masking!
+        if self.releaseStep is not None and self.currIteration >= self.releaseStep:
+            if is_last_layer:
+                self.currIteration += 1
+            return activations3
+        
+        # Between maskingStep and releaseStep - apply masks
+        if self.currIteration > self.maskingStep and self.currIteration < (self.releaseStep if self.releaseStep is not None else float('inf')):
+            if is_last_layer:
+                self.currIteration += 1
+
             if layer_name in self.masks and self.masks[layer_name] is not None:
                 return activations3 * self.masks[layer_name]
             return activations3
@@ -237,8 +261,6 @@ class NeuronDefuser:
                     (1 - self.ema_decay) * last_gen_forward_proxy_mean
                 )
 
-        is_last_layer = (layer_name == list(self.forward_proxies_max.keys())[-1])
-        
         # Keep a count of the iteration we are at.
         if self.currIteration < self.maskingStep:
             if is_last_layer:
@@ -246,6 +268,13 @@ class NeuronDefuser:
             return activations3
         
         elif self.currIteration == self.maskingStep:
+            if is_last_layer:
+                print(f"\n🔒 MASKING TRIGGERED at iteration {self.currIteration} (maskingStep={self.maskingStep})")
+                if self.releaseStep is not None:
+                    print(f"   Masks will be released at iteration {self.releaseStep}")
+                else:
+                    print(f"   Masks will remain active (no releaseStep set)")
+            
             layer_topk = self.per_layer_topk.get(layer_name, -1)  # Get configured value
             layer_num = self.layer_name_to_number.get(layer_name, -1)
     
@@ -342,7 +371,7 @@ class NeuronDefuser:
             return
         if self.currIteration > self.maskingStep:
             return
-        print(f"Caching pre-MLP activations for layer {layer_name} and activation value {activation.shape}")
+        #print(f"Caching pre-MLP activations for layer {layer_name} and activation value {activation.shape}")
         self.pre_mlp_cache[layer_name] = activation
 
     def calculate_mlp_impact(self, layer_name, post_mlp_activation):
@@ -604,6 +633,143 @@ class NeuronDefuser:
         else:
             print(f"SAFETY HARNESS: Layer {layer_name} has already been updated with auto pruning calculations.")
             return self.per_layer_topk[layer_name]
+
+    def calculate_knowledge_drift(self, layer_name, activation):
+        """Called by post_attention_layernorm hook"""
+        if self.maskingStep is None:
+            return
+        
+        # Initialize list if not exists
+        if layer_name not in self.post_attn_oproj_cache:
+            self.post_attn_oproj_cache[layer_name] = []
+        
+        # Initialize counter for this layer if not exists
+        if layer_name not in self.oproj_counter:
+            self.oproj_counter[layer_name] = 0
+        
+        if self.currIteration < self.maskingStep:
+            self.post_attn_oproj_cache[layer_name].append(activation)
+        elif self.currIteration == self.maskingStep:
+            # Calculate the average of all embeddings uptil now,
+            # Compute their cosine similarities. Check what's the min and if we get near that, this will be our threshold.
+            print(f"\n🔍 Computing attention distribution for layer {layer_name} at masking step {self.maskingStep}...")
+            self.compute_attention_distribution(layer_name)
+
+            # save this run's activations.
+            self.post_attn_oproj_cache[layer_name].append(activation)
+            self.oproj_counter[layer_name] += 1
+            return
+        elif self.currIteration > self.maskingStep:
+            if self.oproj_counter[layer_name] < self.oproj_max_count:
+                self.post_attn_oproj_cache[layer_name].append(activation)
+                self.oproj_counter[layer_name] += 1
+                return
+            else:
+                #Trigger the cosine match mechanism
+                #Calculate if the average cosine of this window's tokens with the masking mechanism's tokens is below the threshold.
+                #if it is, then just engage the mask predictor mechanism and allow the mask to be recalculate.
+                #this is also the starting point of enabling the topk neurons. 
+                # reset oroj until the new mask is finalized.
+                return
+        #print(f"Caching pre-MLP activations for layer {layer_name} and activation value {activation.shape}")
+
+    def compute_attention_distribution(self, layer_name):
+        """Compute cosine similarity of each token with the mean of all tokens (prompt + generated).
+        
+        All computations are performed on GPU using PyTorch tensors for efficiency.
+        Handles edge cases like zero vectors and ensures numerical stability.
+        """
+        try:
+            # Get activations list for this specific layer
+            if layer_name not in self.post_attn_oproj_cache:
+                return
+            
+            activations_list = self.post_attn_oproj_cache[layer_name]
+            if len(activations_list) == 0:
+                return
+            
+            # Concatenate all cached activations for this layer
+            all_activations = torch.cat(activations_list, dim=0)  # Shape: (N, D)
+            N, D = all_activations.size()
+            
+            if N == 0 or D == 0:
+                print(f"\nWarning: Empty activations for layer {layer_name}")
+                return
+            
+            # Compute mean of all tokens (prompt + generated)
+            mean_activation = all_activations.mean(dim=0)  # Shape: (D,)
+            
+            # Compute norms for normalization
+            norms = all_activations.norm(dim=1, keepdim=True)  # Shape: (N, 1)
+            mean_norm = mean_activation.norm()  # Scalar
+            
+            # Initialize similarities tensor
+            cosine_similarities = torch.zeros(N, dtype=all_activations.dtype, device=self.device)
+            
+            # Handle edge cases
+            both_zero = (norms.squeeze() == 0.0) & (mean_norm == 0.0)
+            either_zero = ((norms.squeeze() == 0.0) | (mean_norm == 0.0)) & (~both_zero)
+            valid = (norms.squeeze() > 0.0) & (mean_norm > 0.0)
+            
+            # Set similarities based on cases
+            cosine_similarities[both_zero] = 1.0
+            cosine_similarities[either_zero] = 0.0
+            
+            # Compute cosine similarity for valid cases (on GPU)
+            if valid.any():
+                norm_activations = all_activations[valid] / norms[valid]
+                norm_mean = mean_activation / mean_norm
+                cosine_similarities[valid] = torch.matmul(norm_activations, norm_mean)
+            
+            # Clip to valid cosine range
+            cosine_similarities = torch.clamp(cosine_similarities, -1.0, 1.0)
+            
+            # Fit Gaussian distribution to baseline similarities
+            mean_cosine = cosine_similarities.mean().item()  # μ
+            std_cosine = cosine_similarities.std().item()    # σ
+            min_cosine = cosine_similarities.min().item()
+            max_cosine = cosine_similarities.max().item()
+            
+            # Calculate distribution statistics
+            # Percentage of tokens within 1σ, 2σ, 3σ of mean
+            within_1sigma = ((cosine_similarities >= mean_cosine - std_cosine) & 
+                           (cosine_similarities <= mean_cosine + std_cosine)).sum().item()
+            within_2sigma = ((cosine_similarities >= mean_cosine - 2*std_cosine) & 
+                           (cosine_similarities <= mean_cosine + 2*std_cosine)).sum().item()
+            within_3sigma = ((cosine_similarities >= mean_cosine - 3*std_cosine) & 
+                           (cosine_similarities <= mean_cosine + 3*std_cosine)).sum().item()
+            
+            pct_1sigma = (within_1sigma / N) * 100.0 if N > 0 else 0.0
+            pct_2sigma = (within_2sigma / N) * 100.0 if N > 0 else 0.0
+            pct_3sigma = (within_3sigma / N) * 100.0 if N > 0 else 0.0
+            
+            # Store Gaussian parameters (baseline distribution)
+            self.attention_mean_cosine[layer_name] = mean_cosine
+            self.attention_std_cosine[layer_name] = std_cosine
+            self.attention_min_cosine[layer_name] = min_cosine
+            self.attention_max_cosine[layer_name] = max_cosine
+            
+            print(f"\nAttention Distribution Stats for layer {layer_name}:")
+            print(f"  Tokens analyzed: {N}")
+            print(f"  Gaussian Parameters:")
+            print(f"    Mean (μ):     {mean_cosine:.6f}")
+            print(f"    Std Dev (σ):  {std_cosine:.6f}")
+            print(f"    Min:          {min_cosine:.6f}")
+            print(f"    Max:          {max_cosine:.6f}")
+            print(f"  Distribution Coverage:")
+            print(f"    Within 1σ:    {pct_1sigma:.1f}% (expected ~68%)")
+            print(f"    Within 2σ:    {pct_2sigma:.1f}% (expected ~95%)")
+            print(f"    Within 3σ:    {pct_3sigma:.1f}% (expected ~99.7%)\n")
+            
+            
+        except Exception as e:
+            print(f"Error computing attention distribution for layer {layer_name}: {e}")
+            raise
+        finally:
+            # Clear cache for this layer after computation
+            if layer_name in self.post_attn_oproj_cache:
+                self.post_attn_oproj_cache[layer_name].clear()
+
 
     def save_results(self, filename_prefix="neuron_masking", output_dir=None):
         """Save the stored neuron statistics to files."""
