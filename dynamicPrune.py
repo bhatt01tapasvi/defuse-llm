@@ -585,7 +585,7 @@ def main():
             }, f)
         print(f"Activations saved to {save_path}")
     
-
+    
     # Perf analysis
     if args.eval_perplexity:
         profiler.start("eval_perplexity")
