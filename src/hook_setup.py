@@ -5,7 +5,7 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
                      post_attn_weights, post_attn_activations, post_attn_oproj_activations,
                      pre_ln2_activations, pre_mlp1_activations,
                      pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-                     mlp2_forward_proxy, embedding_weights, save_activations=False):
+                     mlp2_forward_proxy, embedding_weights, layer_topk, save_activations=False):
     """Setup hooks for GPT2 architecture."""
     hooks = []
     
@@ -35,7 +35,8 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
                 post_attn_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
             elif "mlp2" in sublayer_name:
                 post_mlp2_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
-                neuronDefuser.calculate_mlp_impact(layer_name, activation_magnitude.detach().cpu().numpy())
+                if layer_topk is not None and "auto" in layer_topk:
+                    neuronDefuser.calculate_mlp_impact(layer_name, activation_magnitude.detach().cpu().numpy())
             elif "layer" in sublayer_name:
                 post_layer_activations[layer_name].append(activation_magnitude.detach().cpu().numpy())
         return hook_fn
@@ -118,7 +119,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                       post_attn_weights, post_attn_activations, post_attn_oproj_activations,
                       pre_ln2_activations, pre_mlp1_activations,
                       pre_mlp2_activations, post_mlp2_activations, post_layer_activations,
-                      mlp2_forward_proxy, embedding_weights, mlp2_weights, save_activations=False):
+                      mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk, save_activations=False):
     """Setup hooks for LLaMA architecture."""
     hooks = []
     
@@ -150,11 +151,11 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 activation_magnitude = activation_tensor
 
             # CRITICAL: Calculate MLP impact BEFORE save_activations check (needed for adaptive pruning)
-            if "mlp_down" in sublayer_name:
+            if "mlp_down" in sublayer_name and layer_topk is not None and "auto" in layer_topk:
                 neuronDefuser.calculate_mlp_impact(layer_name, activation_magnitude.detach().cpu().numpy())
             
-            if "attn" in sublayer_name or "self_attn" in sublayer_name:
-                neuronDefuser.calculate_knowledge_drift(layer_name, activation_magnitude)
+            # if "attn" in sublayer_name or "self_attn" in sublayer_name:
+            #     neuronDefuser.calculate_knowledge_drift(layer_name, activation_magnitude)
             # Only save activations if flag is enabled
             if not save_activations:
                 return
@@ -203,7 +204,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
                 activation_magnitude = inp_tensor.mean(dim=0)
 
             # CRITICAL: Cache pre-MLP BEFORE save_activations check (needed for adaptive pruning)
-            if "post_attention_layernorm" in sublayer_name:
+            if "post_attention_layernorm" in sublayer_name and layer_topk is not None and "auto" in layer_topk:
                 neuronDefuser.cache_pre_mlp(layer_name, activation_magnitude.detach().cpu().numpy())
             
             # Only save activations if flag is enabled

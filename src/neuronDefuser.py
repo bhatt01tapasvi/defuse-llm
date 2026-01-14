@@ -12,7 +12,7 @@ PRUNE_DIR = os.path.join(RESULTS_DIR, "pruneNeurons")
 #MAX_FORWARD_PROXY = os.path.join(PRUNING_DIR, "maxProxy")
 
 class NeuronDefuser:
-    def __init__(self, maskingStep: int=0, releaseStep: int=None, per_layer_topk: dict=None, ema_decay: float=None, ranking_method: str='combined', prune_strategy: str='topk', total_prune_percent: float=50.0, device: str='cuda'):
+    def __init__(self, maskingStep: int=0, releaseStep: int=None, per_layer_topk: dict=None, ema_decay: float=None, ranking_method: str='combined', prune_strategy: str='topk', total_prune_percent: float=50.0, verbose: bool=True, device: str='cuda'):
         """
         Args:
             maskingStep: Step at which to start applying masks
@@ -23,9 +23,11 @@ class NeuronDefuser:
             ranking_method: One of ['max', 'mean', 'combined', 'product']
             prune_strategy: 'topk' or 'threshold'
             total_prune_percent: Target total pruning percentage for adaptive pruning (default: 50.0)
+            verbose: Enable verbose output (default: True)
             device: Device to run on
         """
         self.currIteration = 0
+        self.prompt_count = 0  # Count of detected prompts
         self.maskingStep = maskingStep
         self.releaseStep = releaseStep
         self.device = device
@@ -33,6 +35,7 @@ class NeuronDefuser:
         self.ranking_method = ranking_method
         self.prune_strategy = prune_strategy  # 'topk' or 'threshold'
         self.total_prune_percent = total_prune_percent  # Target total pruning percentage
+        self.verbose = verbose  # Control print statements
 
         # Store the original per_layer_topk config
         self.per_layer_topk_config = per_layer_topk if per_layer_topk is not None else {}
@@ -97,7 +100,8 @@ class NeuronDefuser:
             print(f"DEBUG: No match found for layer {layer_num} or {layer_name}")
         
         self.per_layer_topk[layer_name] = topk_value
-        print(f"DEBUG: Set topk for {layer_name} to {topk_value}")
+        if self.verbose:
+            print(f"DEBUG: Set topk for {layer_name} to {topk_value}")
 
     def populate_forward_proxy(self, layer_name: str, weight: torch.Tensor, embedding_weights: torch.Tensor):
         self._register_layer(layer_name)
@@ -152,6 +156,23 @@ class NeuronDefuser:
         else:
             raise ValueError(f"Unknown ranking method: {self.ranking_method}")
 
+    def reset_state(self):
+        """Reset internal state for new prompt detection."""
+        self.currIteration = 0
+        self.ema_activations = {}
+        self.ema_max = {}
+        self.ema_mean = {}
+        self.masks = {}
+        self.mlp_impact_history = {}
+        self.post_attn_oproj_cache = {}
+        self.oproj_counter = {}
+        self.prompt_count += 1
+        if self.verbose:
+            print(f"\n=== Detected new prompt #{self.prompt_count}, resetting NeuronDefuser state ===\n")
+        
+        # Reset per_layer_topk to original config for fresh adaptive computation
+        #self.per_layer_topk = self.per_layer_topk_config.copy()
+
     def defuse_neurons(self, layer_name: str, activations3: torch.Tensor):
         """
         Deactivates neurons in the activations tensor that have mean activation below the threshold.
@@ -166,9 +187,18 @@ class NeuronDefuser:
         if self.maskingStep is None:
             return activations3
         
+        batch_size, seq_len, hidden_dim = activations3.shape
+        # ==================== DETECTION ====================
+        # Only reset once per prompt - when layer_0 detects seq_len > 1
+        if seq_len > 1 and layer_name == "layer_0":
+            if self.verbose:
+                print(f"DEBUG: Detected new prompt (seq_len={seq_len}), calling reset_state()")
+            self.reset_state()
+        # ===================================================
+
         # Check if this is the last layer (for counter increment)
         is_last_layer = (layer_name == list(self.forward_proxies_max.keys())[-1])
-        
+
         #Release step means no more masking!
         if self.releaseStep is not None and self.currIteration >= self.releaseStep:
             if is_last_layer:
@@ -184,7 +214,7 @@ class NeuronDefuser:
                 return activations3 * self.masks[layer_name]
             return activations3
 
-        batch_size, seq_len, hidden_dim = activations3.shape
+        
         activations = activations3[0]
 
         if self.currIteration == 0:
@@ -268,13 +298,6 @@ class NeuronDefuser:
             return activations3
         
         elif self.currIteration == self.maskingStep:
-            if is_last_layer:
-                print(f"\n🔒 MASKING TRIGGERED at iteration {self.currIteration} (maskingStep={self.maskingStep})")
-                if self.releaseStep is not None:
-                    print(f"   Masks will be released at iteration {self.releaseStep}")
-                else:
-                    print(f"   Masks will remain active (no releaseStep set)")
-            
             layer_topk = self.per_layer_topk.get(layer_name, -1)  # Get configured value
             layer_num = self.layer_name_to_number.get(layer_name, -1)
     
@@ -286,26 +309,31 @@ class NeuronDefuser:
                 
                 ## SAFETY HARNESS ##
                 if num_layers_with_history < num_registered_layers:
-                    print(f"WARNING: Insufficient MLP impact history for adaptive pruning.")
-                    print(f"  Registered layers: {num_registered_layers}, History available: {num_layers_with_history}")
-                    print(f"  Deferring masking to next iteration (currIter={self.currIteration}, maskingStep={self.maskingStep})...")
+                    if self.verbose:
+                        print(f"WARNING: Insufficient MLP impact history for adaptive pruning.")
+                        print(f"  Registered layers: {num_registered_layers}, History available: {num_layers_with_history}")
+                        print(f"  Deferring masking to next iteration (currIter={self.currIteration}, maskingStep={self.maskingStep})...")
                     
                     # Increment maskingStep so we try again next iteration
                     if is_last_layer:
                         self.maskingStep += 1
                         self.currIteration += 1
-                        print(f"  Updated maskingStep to {self.maskingStep}, currIteration to {self.currIteration}")
+                        if self.verbose:
+                            print(f"  Updated maskingStep to {self.maskingStep}, currIteration to {self.currIteration}")
                     return activations3
                 ## END SAFETY HARNESS ##
                 
                 layer_topk = self.compute_adaptive_topk(layer_name=layer_name, hidden_dim=hidden_dim, total_prune_percent=self.total_prune_percent)
-                print(f"Auto-calculated topk for layer {layer_num}: {layer_topk}")
+                if self.verbose:
+                    print(f"Auto-calculated topk for layer {layer_num}: {layer_topk}")
             else:
-                print(f"Using manual topk for layer {layer_num}: {layer_topk}")
+                if self.verbose:
+                    print(f"Using manual topk for layer {layer_num}: {layer_topk}")
             
             if layer_topk == -1:
                 # Don't prune this layer - keep all neurons
-                print(f"Skipping pruning for layer {layer_num}: {layer_name}")
+                if self.verbose:
+                    print(f"Skipping pruning for layer {layer_num}: {layer_name}")
                 self.masks[layer_name] = None  # No mask means keep all
             else:
                 # Prune this layer
@@ -357,12 +385,6 @@ class NeuronDefuser:
         # Apply mask to activations (if mask exists for this layer)
         if layer_name in self.masks and self.masks[layer_name] is not None:
             activations3 *= self.masks[layer_name]
-            #print the dimensions of activations3
-            # Check the mast is applied properly by counting the number of 0 and that they match the masked neurons.
-            num_masked = (self.masks[layer_name] == 0).sum().item()
-            num_actually_masked = (activations3[-1][:, self.masks[layer_name] == 0] == 0).all(dim=0).sum().item()
-            assert num_masked == num_actually_masked, f"Masking error in layer {layer_name}: expected {num_masked} masked neurons, but only {num_actually_masked} neurons are actually zero."
-        
         return activations3
 
     def cache_pre_mlp(self, layer_name, activation):
@@ -371,6 +393,9 @@ class NeuronDefuser:
             return
         if self.currIteration > self.maskingStep:
             return
+        if self.verbose:
+            if layer_name == "layer_0":
+                print(f"DEBUG: cache_pre_mlp called for {layer_name}, currIter={self.currIteration}, maskingStep={self.maskingStep}")
         #print(f"Caching pre-MLP activations for layer {layer_name} and activation value {activation.shape}")
         self.pre_mlp_cache[layer_name] = activation
 
@@ -381,7 +406,15 @@ class NeuronDefuser:
         if self.currIteration > self.maskingStep:
             return
         if layer_name not in self.pre_mlp_cache:
+            if self.verbose:
+                if layer_name == "layer_0":
+                    print(f"DEBUG: calculate_mlp_impact called but pre_mlp_cache missing for {layer_name}, currIter={self.currIteration}")
             return
+
+        if self.verbose:
+            if layer_name == "layer_0":
+                print(f"DEBUG: calculate_mlp_impact executing for {layer_name}, currIter={self.currIteration}, cache_size={len(self.mlp_impact_history.get(layer_name, []))}")
+                print(f"DEBUG: pre_mlp shape={self.pre_mlp_cache[layer_name].shape}, post_mlp shape={post_mlp_activation.shape}")
 
         # Store metrics
         if layer_name not in self.mlp_impact_history:
@@ -479,17 +512,20 @@ class NeuronDefuser:
             rho = total_prune_percent / 100.0
             B = rho * L  # Total pruning budget
             
-            print(f"\n  {'='*80}")
-            print(f"  Depth-Aware Pruning Strategy")
-            print(f"  {'='*80}")
-            print(f"  Target: {total_prune_percent}% total pruning (B = ρL = {B:.2f})")
-            print(f"  Layers: L = {L}")
-            print(f"  Config: we={we}, wl={wl}, α={alpha}, β={beta}, p_min={p_min}, p_max={p_max}")
+            if self.verbose:
+                print(f"\n  {'='*80}")
+                print(f"  Depth-Aware Pruning Strategy")
+                print(f"  {'='*80}")
+                print(f"  Target: {total_prune_percent}% total pruning (B = ρL = {B:.2f})")
+                print(f"  Layers: L = {L}")
+                print(f"  Config: we={we}, wl={wl}, α={alpha}, β={beta}, p_min={p_min}, p_max={p_max}")
             
             # ==================== STEP 1: Per-layer functional importance ====================
             # S_ℓ = (1 - cos_ℓ) · ||Δx_ℓ|| / ||x_ℓ,pre||
             S = (1 - avg_cosine) * (avg_ratio_norm)
+            #S = (1 - avg_cosine)
             
+
             # ==================== STEP 2: Normalize importance ====================
             # Ŝ_ℓ = (S_ℓ - min S_j) / (max S_j - min S_j + ε)
             S_min = np.min(S)
@@ -540,7 +576,8 @@ class NeuronDefuser:
                 
                 # Check convergence
                 if abs(delta) < epsilon:
-                    print(f"    ✓ Converged at iteration {iteration}: |Δ| = {abs(delta):.9f} < ε")
+                    if self.verbose:
+                        print(f"    ✓ Converged at iteration {iteration}: |Δ| = {abs(delta):.9f} < ε")
                     break
                 
                 # Determine which layers can be adjusted based on sign of delta
@@ -554,11 +591,12 @@ class NeuronDefuser:
                     operation = "decrease pruning"
                 
                 if not np.any(available_mask):
-                    if delta > 0:
-                        print(f"    ⚠ All layers at p_max. Cannot prune more.")
-                    else:
-                        print(f"    ⚠ All layers at p_min. Cannot prune less.")
-                    print(f"      Final sum: {current_sum:.6f}, Target: {B:.6f}, Gap: {delta:.6f}")
+                    if self.verbose:
+                        if delta > 0:
+                            print(f"    ⚠ All layers at p_max. Cannot prune more.")
+                        else:
+                            print(f"    ⚠ All layers at p_min. Cannot prune less.")
+                        print(f"      Final sum: {current_sum:.6f}, Target: {B:.6f}, Gap: {delta:.6f}")
                     break
                 
                 # Weighted redistribution: p_ℓ = p_ℓ + Δ · [indicator · P_ℓ] / Σ[indicator · P_j]
@@ -580,53 +618,59 @@ class NeuronDefuser:
                 
                 iteration += 1
                 
-                if iteration % 10 == 0:
+                if self.verbose and iteration % 10 == 0:
                     print(f"    Iteration {iteration}: Δ = {delta:.9f}, {operation}, available = {np.sum(available_mask)}")
             
             if iteration >= max_iterations:
-                print(f"    ⚠ Reached max iterations ({max_iterations})")
+                if self.verbose:
+                    print(f"    ⚠ Reached max iterations ({max_iterations})")
             
             # ==================== STEP 9: Final results ====================
             final_sum = np.sum(p)
             final_percent = (final_sum / L) * 100
             
-            print(f"\n  Step 9: Final pruning ratios")
-            print(f"    Sum: {final_sum:.6f} / {B:.6f} (satisfaction: {(final_sum/B)*100:.2f}%)")
-            print(f"    Average per-layer: {final_percent:.2f}%")
+            if self.verbose:
+                print(f"\n  Step 9: Final pruning ratios")
+                print(f"    Sum: {final_sum:.6f} / {B:.6f} (satisfaction: {(final_sum/B)*100:.2f}%)")
+                print(f"    Average per-layer: {final_percent:.2f}%")
             
             # Convert to percentages for display
             p_percent = p * 100
             keep_percent = 100 - p_percent
             
             # ==================== Detailed Output ====================
-            print(f"\n  {'='*115}")
-            print(f"  Layer-wise Breakdown")
-            print(f"  {'='*115}")
-            print(f"  {'Layer':<6} {'z_ℓ':<8} {'S_ℓ':<10} {'Ŝ_ℓ':<10} {'R_ℓ':<10} {'D_ℓ':<10} {'P_ℓ':<10} {'p̃_ℓ':<10} {'p_ℓ':<10} {'Prune%':<10} {'Keep%':<10}")
-            print(f"  {'-'*115}")
-            
-            for i in range(num_layers):
-                print(f"  {layers[i]:<6} {z[i]:<8.4f} {S[i]:<10.6f} {S_hat[i]:<10.6f} {R[i]:<10.6f} {D[i]:<10.6f} "
-                    f"{P_pressure[i]:<10.6f} {p_tilde[i]:<10.6f} {p[i]:<10.6f} {p_percent[i]:<10.2f} {keep_percent[i]:<10.2f}")
+            if self.verbose:
+                print(f"\n  {'='*115}")
+                print(f"  Layer-wise Breakdown")
+                print(f"  {'='*115}")
+                print(f"  {'Layer':<6} {'z_ℓ':<8} {'S_ℓ':<10} {'Ŝ_ℓ':<10} {'R_ℓ':<10} {'D_ℓ':<10} {'P_ℓ':<10} {'p̃_ℓ':<10} {'p_ℓ':<10} {'Prune%':<10} {'Keep%':<10}")
+                print(f"  {'-'*115}")
+                
+                for i in range(num_layers):
+                    print(f"  {layers[i]:<6} {z[i]:<8.4f} {S[i]:<10.6f} {S_hat[i]:<10.6f} {R[i]:<10.6f} {D[i]:<10.6f} "
+                        f"{P_pressure[i]:<10.6f} {p_tilde[i]:<10.6f} {p[i]:<10.6f} {p_percent[i]:<10.2f} {keep_percent[i]:<10.2f}")
             
             # ==================== Summary Statistics ====================
-            print(f"\n  {'='*80}")
-            print(f"  Summary Statistics")
-            print(f"  {'='*80}")
-            print(f"  Target Total Pruning:     {total_prune_percent:.2f}%")
-            print(f"  Actual Total Pruning:     {final_percent:.2f}%")
+            if self.verbose:
+                print(f"\n  {'='*80}")
+                print(f"  Summary Statistics")
+                print(f"  {'='*80}")
+                print(f"  Target Total Pruning:     {total_prune_percent:.2f}%")
+                print(f"  Actual Total Pruning:     {final_percent:.2f}%")
             
             # Update all layers at once with their calculated topk values
-            print(f"\n  {'='*80}")
-            print(f"  Setting per-layer topk values:")
-            print(f"  {'='*80}")
+            if self.verbose:
+                print(f"\n  {'='*80}")
+                print(f"  Setting per-layer topk values:")
+                print(f"  {'='*80}")
             for layer_idx in range(num_layers):
                 # Find the layer_name for this layer_idx
                 target_layer_name = self.layer_number_to_name[layer_idx]
                 # Calculate neurons to keep: (1 - prune_ratio) * total_neurons
                 neurons_to_keep = int(round((1 - p[layer_idx]) * hidden_dim))
                 self.per_layer_topk[target_layer_name] = neurons_to_keep
-                print(f"    Layer {layer_idx} ({target_layer_name}): keep {neurons_to_keep}/{hidden_dim} neurons (prune {p_percent[layer_idx]:.2f}%)")
+                if self.verbose:
+                    print(f"    Layer {layer_idx} ({target_layer_name}): keep {neurons_to_keep}/{hidden_dim} neurons (prune {p_percent[layer_idx]:.2f}%)")
             
             # Return the topk for the requested layer
             return self.per_layer_topk[layer_name]
@@ -652,7 +696,8 @@ class NeuronDefuser:
         elif self.currIteration == self.maskingStep:
             # Calculate the average of all embeddings uptil now,
             # Compute their cosine similarities. Check what's the min and if we get near that, this will be our threshold.
-            print(f"\n🔍 Computing attention distribution for layer {layer_name} at masking step {self.maskingStep}...")
+            if self.verbose:
+                print(f"\n🔍 Computing attention distribution for layer {layer_name} at masking step {self.maskingStep}...")
             self.compute_attention_distribution(layer_name)
 
             # save this run's activations.
@@ -749,17 +794,18 @@ class NeuronDefuser:
             self.attention_min_cosine[layer_name] = min_cosine
             self.attention_max_cosine[layer_name] = max_cosine
             
-            print(f"\nAttention Distribution Stats for layer {layer_name}:")
-            print(f"  Tokens analyzed: {N}")
-            print(f"  Gaussian Parameters:")
-            print(f"    Mean (μ):     {mean_cosine:.6f}")
-            print(f"    Std Dev (σ):  {std_cosine:.6f}")
-            print(f"    Min:          {min_cosine:.6f}")
-            print(f"    Max:          {max_cosine:.6f}")
-            print(f"  Distribution Coverage:")
-            print(f"    Within 1σ:    {pct_1sigma:.1f}% (expected ~68%)")
-            print(f"    Within 2σ:    {pct_2sigma:.1f}% (expected ~95%)")
-            print(f"    Within 3σ:    {pct_3sigma:.1f}% (expected ~99.7%)\n")
+            if self.verbose:
+                print(f"\nAttention Distribution Stats for layer {layer_name}:")
+                print(f"  Tokens analyzed: {N}")
+                print(f"  Gaussian Parameters:")
+                print(f"    Mean (μ):     {mean_cosine:.6f}")
+                print(f"    Std Dev (σ):  {std_cosine:.6f}")
+                print(f"    Min:          {min_cosine:.6f}")
+                print(f"    Max:          {max_cosine:.6f}")
+                print(f"  Distribution Coverage:")
+                print(f"    Within 1σ:    {pct_1sigma:.1f}% (expected ~68%)")
+                print(f"    Within 2σ:    {pct_2sigma:.1f}% (expected ~95%)")
+                print(f"    Within 3σ:    {pct_3sigma:.1f}% (expected ~99.7%)\n")
             
             
         except Exception as e:

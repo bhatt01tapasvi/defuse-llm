@@ -15,10 +15,10 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
-DEVICE=4                  # CUDA device ID
+DEVICE=5                  # CUDA device ID
 
 # Model configuration
-MODE="manual"             # Options: "manual", "auto"
+MODE="auto"             # Options: "manual", "auto"
 #MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B","Llama-2-7b-hf"  etc.
 #MODEL="meta-llama/Llama-3.2-3B"
 #MODEL="meta-llama/Llama-2-7b-hf"
@@ -29,19 +29,40 @@ SAVE_MODEL=""             # Path to save the model (leave empty to skip)
 
 # Prompt configuration
 PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_SUBJECT="marketing"           # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH="10000"               # Leave empty for None (no prompt length limit)
+PROMPT_LENGTH=4000               # Leave empty for None (no prompt length limit)
 CUSTOM_PROMPT_TEXT=""        # Custom prompt text (leave empty to use prompt_subject)
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
-LAYER_TOPK="all:auto"
-#LAYER_TOPK="0:0.9000,1:0.8243,2:0.7220,3:0.7199,4:0.7737,5:0.7675,6:0.7837,7:0.7053,8:0.6681,9:0.6317,10:0.6626,11:0.5000,12:0.5605,13:0.5175,14:0.4466,15:0.3437,16:0.2510,17:0.2469,18:0.2169,19:0.1345,20:0.1006,21:0.1006,22:0.1006,23:0.1006,24:0.2689,25:0.4198,26:0.6324,27:0.9000"              # Layer-specific top-k configuration (leave empty for None)
-#LAYER_TOPK="0:0.9000,1:0.9,2:0.8,3:0.8,4:0.8,5:0.8,6:0.8,7:0.7053,8:0.7,9:0.6317,10:0.6626,11:0.5000,12:0.5605,13:0.5175,14:0.45,15:0.35,16:0.25,17:0.25,18:0.21,19:0.14,20:0.1006,21:0.1006,22:0.1006,23:0.1006,24:0.9,25:0.9,26:0.9,27:0.9000"              # Layer-specific top-k configuration (leave empty for None)
+#LAYER_TOPK="all:auto"
+#LAYER_TOPK_3_2_3B="0:89.36,1:73.14,2:71.52,3:69.10,4:88.04,5:90.00,6:89.36,7:87.90,8:87.49,9:82.10,10:79.28,11:58.62,12:59.11,13:53.46,14:43.72,15:15.79,16:10.00,17:10.00,18:10.00,19:10.00,20:10.00,21:10.00,22:10.00,23:10.00,24:10.00,25:28.09,26:53.96,27:89.96"              # Layer-specific top-k configuration (leave empty for None)
+
+LAYER_TOPK_3_2_3B_72="0:0.8936,1:0.914,2:0.952,3:0.910,4:0.904,5:0.9000,6:0.8936,7:0.8790,8:0.8749,9:0.910,10:0.9928,11:0.9862,12:0.9911,13:0.9346,14:0.9372,15:0.9579,16:0.9000,17:0.9000,18:0.9000,19:0.9000,20:0.9000,21:0.9000,22:0.9000,23:0.9000,24:0.9000,25:0.909,26:0.896,27:0.8996"              # Layer-specific top-k configuration (leave empty for None)
+
+LAYER_TOPK_3_2_3B="0:0.8936,1:0.7314,2:0.7152,3:0.6910,4:0.8804,5:0.9000,6:0.8936,7:0.8790,8:0.8749,9:0.8210,10:0.8928,11:0.8862,12:0.8911,13:0.8346,14:0.8372,15:0.8579,16:0.1000,17:0.1000,18:0.1000,19:0.1000,20:0.1000,21:0.1000,22:0.1000,23:0.1000,24:0.1000,25:0.289,26:0.536,27:0.8996"              # Layer-specific top-k configuration (leave empty for None)
+LAYER_TOPK_3_2_3B_NO_MAG="0:0.7172,1:0.6579,2:0.6148,3:0.5903,4:0.8746,5:0.90,6:0.899,7:0.89,8:0.8981,9:0.8871,10:0.8766,11:0.6749,12:0.6715,13:0.6192,14:0.468,15:0.1254,16:0.10,17:0.10,18:0.10,19:0.10,20:0.10,21:0.10,22:0.10,23:0.10,24:0.10,25:0.31,26:0.59,27:0.8325"
+LAYER_TOPK_3_2_3B_NO_MAG_NO_BORDER="0:0.25,1:0.338,2:0.3133,3:0.3854,4:0.8916,5:0.90,6:0.8998,7:0.8983,8:0.8997,9:0.898,10:0.8964,11:0.7845,12:0.7822,13:0.7475,14:0.8473,15:0.8202,16:0.3561,17:0.2485,18:0.171,19:0.10,20:0.10,21:0.10,22:0.10,23:0.10,24:0.10,25:0.3192,26:0.4703,27:0.6827"
+LAYER_TOPK_3_2_3B_NO_BORDER="0:0.8933,1:0.4035,2:0.5019,3:0.5544,4:0.8745,5:0.90,6:0.8979,7:0.8939,8:0.8937,9:0.8638,10:0.8424,11:0.6851,12:0.6889,13:0.6459,14:0.5717,15:0.3592,16:0.2585,17:0.1664,18:0.1071,19:0.10,20:0.10,21:0.10,22:0.10,23:0.10,24:0.10,25:0.1845,26:0.3137,27:0.8997"
+
+LAYER_TOPK_2_7b="0:0.6344,1:0.7179,2:0.6798,3:0.7629,4:0.7294,5:0.8002,6:0.8124,7:0.8171,8:0.7799,9:0.7257,10:0.7329,11:0.7176,12:0.7215,13:0.6268,14:0.5540,15:0.4764,16:0.3374,17:0.2967,18:0.2265,19:0.1587,20:0.1238,21:0.1361,22:0.1164,23:0.1445,24:0.1156,25:0.2226,26:0.1455,27:0.2758,28:0.3781,29:0.4487,30:0.6846,31:0.9000"              # Layer-specific top-k configuration (leave empty for None)
+LAYER_TOPK_2_7b_NO_MAG_NO_BORDER="0:0.1,1:0.1,2:0.1972,3:0.6299,4:0.596,5:0.8744,6:0.8943,7:0.8975,8:0.8969,9:0.8953,10:0.8985,11:0.8988,12:0.9,13:0.872,14:0.7738,15:0.6629,16:0.4479,17:0.4053,18:0.3078,19:0.2072,20:0.1507,21:0.1874,22:0.1604,23:0.2142,24:0.1644,25:0.3622,26:0.224,27:0.3307,28:0.3003,29:0.1756,30:0.5308,31:0.7436"
+LAYER_TOPK_2_7b_70="0:0.2855,1:0.4487,2:0.3741,3:0.5367,4:0.4712,5:0.6095,6:0.6333,7:0.6425,8:0.5698,9:0.464,10:0.4781,11:0.4482,12:0.4557,13:0.2707,14:0.1284,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.1,28:0.1,29:0.1,30:0.3837,31:0.9"
+LAYER_TOPK_2_7b_70_NO_MAG_NO_BORDER="0:0.1,1:0.1,2:0.1,3:0.1,4:0.1,5:0.6157,6:0.7189,7:0.8283,8:0.8124,9:0.768,10:0.8587,11:0.8667,12:0.9,13:0.6082,14:0.3078,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.1,28:0.1,29:0.1,30:0.1,31:0.2155"
+LAYER_TOPK_2_7b_70_NO_BORDER="0:0.1,1:0.1,2:0.1,3:0.3363,4:0.3491,5:0.5787,6:0.6479,7:0.6907,8:0.6613,9:0.6129,10:0.6321,11:0.6111,12:0.6164,13:0.486,14:0.3857,15:0.2788,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.1,28:0.1,29:0.1,30:0.1132,31:0.9"
+LAYER_TOPK_2_7b_80="0:0.1,1:0.2094,2:0.1024,3:0.3355,4:0.2416,5:0.44,6:0.4741,7:0.4873,8:0.383,9:0.2312,10:0.2514,11:0.2086,12:0.2194,13:0.1,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.1,28:0.1,29:0.1,30:0.1161,31:0.9"
+
+LAYER_TOPK_2_13b="0:63.29,1:59.93,2:62.05,3:76.61,4:78.43,5:81.69,6:84.46,7:90.00,8:90.00,9:90.00,10:90.00,11:89.40,12:88.03,13:82.68,14:76.32,15:71.49,16:69.44,17:58.85,18:46.01,19:33.96,20:28.94,21:19.94,22:10.50,23:10.66,24:12.47,25:10.51,26:10.51,27:13.84,28:10.50,29:14.63,30:10.51,31:14.72,32:10.50,33:16.48,34:20.36,35:38.82,36:52.26,37:54.72,38:69.89,39:86.61"
+LAYER_TOPK_2_13b_70="0:0.1353,1:0.1,2:0.1062,3:0.449,4:0.492,5:0.5686,6:0.634,7:0.9,8:0.7858,9:0.7872,10:0.8553,11:0.7503,12:0.7179,13:0.5921,14:0.4422,15:0.3285,16:0.2802,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.1,28:0.1,29:0.1,30:0.1,31:0.1,32:0.1,33:0.1,34:0.1,35:0.1,36:0.1,37:0.1,38:0.2907,39:0.6847"
+LAYER_TOPK_2_13b_80="0:0.1,1:0.1,2:0.1,3:0.1,4:0.1,5:0.1881,6:0.3111,7:0.9,8:0.5968,9:0.5995,10:0.7667,11:0.53,12:0.4691,13:0.2322,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.1,28:0.1,29:0.1,30:0.1,31:0.1,32:0.1,33:0.1,34:0.1,35:0.1,36:0.1,37:0.1,38:0.1,39:0.4065"
+
+#LAYER_TOPK=$LAYER_TOPK_3_2_3B_NO_MAG_NO_BORDER
+LAYER_TOPK=$LAYER_TOPK_2_13b_70
+
 MASKING_STEP=0
 RELEASE_STEP=""              # Step at which to release masked neurons (leave empty for None)
-GENERATION=10
+GENERATION=0
 EMA_DECAY=""
 RANKING_METHOD="max"
 PRUNE_STRATEGY="topk"
@@ -77,13 +98,13 @@ MMLU_SHOTS=2                   # Number of few-shot examples (0=zero-shot, 5=fiv
 MMLU_MAX_SAMPLES=200            # Max samples per MMLU task (leave empty for all)
 
 # Evaluation configuration - General NLP
-EVAL_GENERAL_NLP=false         # Set to true to enable general NLP evaluation
-GENERAL_NLP_DATASETS="boolq"        # Options: "boolq rte hellaswag winogrande arc_easy arc_challenge openbookqa"
-GENERAL_NLP_MAX_SAMPLES=10     # Max samples for general NLP eval (leave empty for all)
+EVAL_GENERAL_NLP=true         # Set to true to enable general NLP evaluation
+GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_easy arc_challenge openbookqa"
+GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-EXPERIMENT_NAME=${TOTAL_PRUNE_PERCENT}_prune_layer_wise
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/lm_eval_all/layer_wise_prune"
+EXPERIMENT_NAME=${TOTAL_PRUNE_PERCENT}prune
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/lm_eval_all"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
@@ -455,7 +476,7 @@ TIMING_TOTAL=$(grep "TIMING_TOTAL=" "$OUTPUT_LOG" | tail -1 | cut -d'=' -f2)
     echo "EXPERIMENT COMPLETED"
     echo "========================================================================"
     echo "Finished at: $END_TIME"
-    echo "Duration: ${DURATION_MIN}m ${DURATION_SEC}s" "($DURATION seconds total)"
+    echo "Duration: ${DURATION_MIN}m ${DURATION_SEC}s ($DURATION seconds total)"
     echo "Exit Status: $EXIT_STATUS"
     echo ""
     

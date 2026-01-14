@@ -323,6 +323,7 @@ def initialize_prompt(tokenizer, device, max_seq_len: int, prompt_type="custom",
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default="gpt2", help='LLM model name or path')
+    parser.add_argument('--mode', type=str, default="manual", help='Mode of operation: manual, auto')
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
     parser.add_argument("--cache_dir", default="llm_weights", type=str)
     parser.add_argument('--save_activations', action='store_true', help='Save activations during model run')
@@ -357,6 +358,7 @@ def main():
                    help='Method to rank neurons for pruning - max, mean, combined, product, magnitude')
     parser.add_argument('--prune_strategy', type=str, default="topk", help='Pruning strategy - topk, automatic configure threshold as mean')
     parser.add_argument('--total_prune_percent', type=float, default=50.0, help='Target total pruning percentage for adaptive pruning (e.g., 50.0 for 50%%)')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output from NeuronDefuser')
 
     # Evaluation arguments
     #### Perplexity
@@ -403,7 +405,7 @@ def main():
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
     profiler.end("model_loading")
-
+    
     # Detect model type
     model_type = detect_model_type(model)
     print(f"Detected model type: {model_type.upper()}")
@@ -462,6 +464,7 @@ def main():
         ranking_method=args.ranking_method,
         prune_strategy=args.prune_strategy,
         total_prune_percent=args.total_prune_percent,
+        verbose=args.verbose,
         device=device
     )
     
@@ -474,7 +477,7 @@ def main():
             pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, 
             post_layer_activations,
-            mlp2_forward_proxy, embedding_weights, save_activations=args.save_activations
+            mlp2_forward_proxy, embedding_weights, layer_topk=args.layer_topk, save_activations=args.save_activations
         )
     elif model_type == 'llama':
         hooks = setup_hooks_llama(
@@ -483,177 +486,172 @@ def main():
             pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, 
             post_layer_activations,
-            mlp2_forward_proxy, embedding_weights, mlp2_weights, save_activations=args.save_activations
+            mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk=args.layer_topk, save_activations=args.save_activations
         )
     profiler.end("hook_setup")
 
-    # Tokenize and run prompt
-    profiler.start("prompt_init")
-    prompt_text, input_ids = initialize_prompt(
-        tokenizer=tokenizer,
-        device=device,
-        max_seq_len=model.config.max_position_embeddings,
-        prompt_type=args.prompt_type,
-        prompt_length=args.prompt_length,
-        prompt_subject=args.prompt_subject,
-        custom_text=args.custom_prompt_text
-    )
-    profiler.end("prompt_init")
+    if args.mode == 'manual':
+        # Tokenize and run prompt
+        profiler.start("prompt_init")
+        prompt_text, input_ids = initialize_prompt(
+            tokenizer=tokenizer,
+            device=device,
+            max_seq_len=model.config.max_position_embeddings,
+            prompt_type=args.prompt_type,
+            prompt_length=args.prompt_length,
+            prompt_subject=args.prompt_subject,
+            custom_text=args.custom_prompt_text
+        )
+        profiler.end("prompt_init")
 
-    # Store initial token count for later
-    initial_token_count = input_ids.shape[1]
+        # Store initial token count for later
+        initial_token_count = input_ids.shape[1]
 
-    # Prefill Phase
-    profiler.start("prefill_phase")
-    start = time.time()
-    with torch.no_grad():
-        outputs = model(input_ids, use_cache=True)
-    times['prefill'] = time.time() - start
-    profiler.end("prefill_phase")
-
-    # Decode / Generation Phase
-    start = time.time()
-    past_key_values = outputs.past_key_values
-    all_tokens = input_ids
-    
-    # Track tokens before and after masking
-    pre_masking_tokens = []
-    post_masking_tokens = []
-    
-    profiler.start("generation_phase")
-    for i in range(args.generation):
-        iter_start = time.time()
+        # Prefill Phase
+        profiler.start("prefill_phase")
+        start = time.time()
         with torch.no_grad():
-            outputs = model(
-                all_tokens[:, -1:],
-                past_key_values=past_key_values,
-                use_cache=True
-            )
-            next_token_logits = outputs.logits[:, -1, :]
-            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            all_tokens = torch.cat([all_tokens, next_token], dim=-1)
-            past_key_values = outputs.past_key_values
-            
-            # Track which phase this token was generated in
-            token_id = next_token.item()
-            if args.maskingStep is not None and i < args.maskingStep:
-                pre_masking_tokens.append(token_id)
-            elif args.maskingStep is not None and i >= args.maskingStep:
-                post_masking_tokens.append(token_id)
+            outputs = model(input_ids, use_cache=True)
+        times['prefill'] = time.time() - start
+        profiler.end("prefill_phase")
+
+        # Decode / Generation Phase
+        start = time.time()
+        past_key_values = outputs.past_key_values
+        all_tokens = input_ids
         
-        if i % 10 == 0:
-            print(f"Token {i}: {time.time() - iter_start:.3f}s")
-    
-    profiler.end("generation_phase")
-    times['generation'] = time.time() - start
-    
-    # Print token generation breakdown
-    if args.maskingStep is not None and args.generation > 0:
+        # Track tokens before and after masking
+        pre_masking_tokens = []
+        post_masking_tokens = []
+        
+        profiler.start("generation_phase")
+        for i in range(args.generation):
+            iter_start = time.time()
+            with torch.no_grad():
+                outputs = model(
+                    all_tokens[:, -1:],
+                    past_key_values=past_key_values,
+                    use_cache=True
+                )
+                next_token_logits = outputs.logits[:, -1, :]
+                next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+                all_tokens = torch.cat([all_tokens, next_token], dim=-1)
+                past_key_values = outputs.past_key_values
+                
+                # Track which phase this token was generated in
+                token_id = next_token.item()
+                if args.maskingStep is not None and i < args.maskingStep:
+                    pre_masking_tokens.append(token_id)
+                elif args.maskingStep is not None and i >= args.maskingStep:
+                    post_masking_tokens.append(token_id)
+            
+            if i % 10 == 0:
+                print(f"Token {i}: {time.time() - iter_start:.3f}s")
+        
+        profiler.end("generation_phase")
+        times['generation'] = time.time() - start
+        
+        # Print token generation breakdown
+        if args.maskingStep is not None and args.generation > 0:
+            print("\n" + "="*80)
+            print("TOKEN GENERATION BREAKDOWN")
+            print("="*80)
+            print(f"Masking activated at token: {args.maskingStep}")
+            print(f"\nPre-masking tokens (0 to {args.maskingStep-1}): {len(pre_masking_tokens)} tokens")
+            print(f"Token IDs: {pre_masking_tokens}")
+            print(f"Decoded text:\n{tokenizer.decode(pre_masking_tokens)}")
+            print("-"*80)
+            print(f"Post-masking tokens ({args.maskingStep} to {args.generation-1}): {len(post_masking_tokens)} tokens")
+            print(f"Token IDs: {post_masking_tokens}")
+            print(f"Decoded text:\n{tokenizer.decode(post_masking_tokens)}")
+            print("="*80 + "\n")
+
+        if args.save_activations:
+            os.makedirs(args.save_res_dir, exist_ok=True)
+            # Create a pickle file to save these datastructures.
+            save_path = os.path.join(args.save_res_dir, 'activations.pkl')
+            with open(save_path, 'wb') as f:
+                pickle.dump({
+                    'pre_ln1_activations': pre_ln1_activations,
+                    'pre_attn_activations': pre_attn_activations,
+                    'post_attn_weights': post_attn_weights,
+                    'post_attn_activations': post_attn_activations,
+                    'post_attn_oproj_activations': post_attn_oproj_activations,
+                    'pre_ln2_activations': pre_ln2_activations,
+                    'pre_mlp1_activations': pre_mlp1_activations,
+                    'pre_mlp2_activations': pre_mlp2_activations,
+                    'post_mlp2_activations': post_mlp2_activations,
+                    'post_layer_activations': post_layer_activations,
+                    #'mlp2_weights': mlp2_weights,
+                    #'embedding_weights': embedding_weights,
+                    #'mlp2_forward_proxy': mlp2_forward_proxy,
+                    #'model_type': model_type
+                }, f)
+            print(f"Activations saved to {save_path}")
+                
+        # Perf analysis
+        if args.eval_perplexity:
+            profiler.start("eval_perplexity")
+            start_time = time.time()
+            evaluate_perplexity(model, tokenizer, device, args.ppl_datasets, args.ppl_subjects, max_samples=args.ppl_max_samples, save_dir=args.save_res_dir)
+            times['eval_ppl'] = time.time() - start_time
+            profiler.end("eval_perplexity")
+        if args.eval_mmlu:
+            profiler.start("eval_mmlu")
+            start_time = time.time()
+            evaluate_mmlu_multi_shot(model, tokenizer, device, args.mmlu_datasets, max_samples=args.mmlu_max_samples, shots=args.mmlu_shots, save_dir=args.save_res_dir)
+            times['eval_mmlu'] = time.time() - start_time
+            profiler.end("eval_mmlu")
+        
+        profiler.print_report()
         print("\n" + "="*80)
-        print("TOKEN GENERATION BREAKDOWN")
+        print("CHECKING FOR LARGE TENSORS IN MEMORY")
         print("="*80)
-        print(f"Masking activated at token: {args.maskingStep}")
-        print(f"\nPre-masking tokens (0 to {args.maskingStep-1}): {len(pre_masking_tokens)} tokens")
-        print(f"Token IDs: {pre_masking_tokens}")
-        print(f"Decoded text:\n{tokenizer.decode(pre_masking_tokens)}")
-        print("-"*80)
-        print(f"Post-masking tokens ({args.maskingStep} to {args.generation-1}): {len(post_masking_tokens)} tokens")
-        print(f"Token IDs: {post_masking_tokens}")
-        print(f"Decoded text:\n{tokenizer.decode(post_masking_tokens)}")
+        large_tensors = find_large_tensors(threshold_mb=50)
+
+        print_gpu_memory_summary()
+        times['end'] = time.time()
+        # Printing the input and output statements.
+        print("\n" + "="*80)
+        print("Generation Results:")
+        print("="*80)
+        print(f"Prompt type: {args.prompt_type}")
+        print(f"Subject: {args.prompt_subject if args.prompt_subject is not None else None}")
+        print(f"Initial prompt tokens: {initial_token_count}")
+        print(f"Generated tokens: {args.generation}")
+        print(f"Total tokens: {all_tokens.shape[1]}")
+        if args.generation > 0:
+            new_tokens = all_tokens[0][initial_token_count:]
+            print(f"Newly generated tokens: {new_tokens.tolist()}")
+            print(f"Newly generated text:\n{tokenizer.decode(new_tokens)}")
         print("="*80 + "\n")
 
-    if args.save_activations:
-        os.makedirs(args.save_res_dir, exist_ok=True)
-        # Create a pickle file to save these datastructures.
-        save_path = os.path.join(args.save_res_dir, 'activations.pkl')
-        with open(save_path, 'wb') as f:
-            pickle.dump({
-                'pre_ln1_activations': pre_ln1_activations,
-                'pre_attn_activations': pre_attn_activations,
-                'post_attn_weights': post_attn_weights,
-                'post_attn_activations': post_attn_activations,
-                'post_attn_oproj_activations': post_attn_oproj_activations,
-                'pre_ln2_activations': pre_ln2_activations,
-                'pre_mlp1_activations': pre_mlp1_activations,
-                'pre_mlp2_activations': pre_mlp2_activations,
-                'post_mlp2_activations': post_mlp2_activations,
-                'post_layer_activations': post_layer_activations,
-                #'mlp2_weights': mlp2_weights,
-                #'embedding_weights': embedding_weights,
-                #'mlp2_forward_proxy': mlp2_forward_proxy,
-                #'model_type': model_type
-            }, f)
-        print(f"Activations saved to {save_path}")
-    
-    
-    # Perf analysis
-    if args.eval_perplexity:
-        profiler.start("eval_perplexity")
-        start_time = time.time()
-        evaluate_perplexity(model, tokenizer, device, args.ppl_datasets, args.ppl_subjects, max_samples=args.ppl_max_samples, save_dir=args.save_res_dir)
-        times['eval_ppl'] = time.time() - start_time
-        profiler.end("eval_perplexity")
-    if args.eval_mmlu:
-        profiler.start("eval_mmlu")
-        start_time = time.time()
-        evaluate_mmlu_multi_shot(model, tokenizer, device, args.mmlu_datasets, max_samples=args.mmlu_max_samples, shots=args.mmlu_shots, save_dir=args.save_res_dir)
-        times['eval_mmlu'] = time.time() - start_time
-        profiler.end("eval_mmlu")
-    if args.eval_general_nlp:
-        start_time = time.time()
-        evaluate_general_datasets(model, tokenizer, device, max_samples=args.general_nlp_max_samples, datasets=args.general_nlp_datasets, save_dir=args.save_res_dir)
-        times['eval_general_nlp'] = time.time() - start_time
-    
+        print("\n" + "="*80)
+        print("TIMING SUMMARY")
+        print("="*80)
+        print(f"TIMING_START={times['start']:.3f}")
+        print(f"TIMING_MODEL_LOAD={times['model_load']:.3f}")
+        print(f"TIMING_PREFILL={times['prefill']:.3f}")
+        print(f"TIMING_GENERATION={times['generation']:.3f}")
+        print(f"TIMING_EVAL_PPL={times['eval_ppl']:.3f}")
+        print(f"TIMING_EVAL_MMLU={times['eval_mmlu']:.3f}")
+        print(f"TIMING_EVAL_GENERAL_NLP={times['eval_general_nlp']:.3f}")
+        print(f"TIMING_END={times['end']:.3f}")
+        print(f"TIMING_TOTAL={times['end'] - times['start']:.3f}")
+        print("="*80 + "\n")
+
+        if args.maskingStep is not None:
+            if args.save_res_dir is not None:
+                os.makedirs(args.save_res_dir, exist_ok=True)
+            neuronDefuser.save_results(output_dir=args.save_res_dir)
+
+    elif args.mode == 'auto':
+        if args.eval_general_nlp:
+            evaluate_general_datasets(model, tokenizer, device, max_samples=args.general_nlp_max_samples, datasets=args.general_nlp_datasets, save_dir=args.save_res_dir)
+        
     # Remove hooks
     for hook in hooks:
         hook.remove()
-
-    profiler.print_report()
-    print("\n" + "="*80)
-    print("CHECKING FOR LARGE TENSORS IN MEMORY")
-    print("="*80)
-    large_tensors = find_large_tensors(threshold_mb=50)
-
-    print_gpu_memory_summary()
-    times['end'] = time.time()
-    # Printing the input and output statements.
-    print("\n" + "="*80)
-    print("Generation Results:")
-    print("="*80)
-    print(f"Prompt type: {args.prompt_type}")
-    print(f"Subject: {args.prompt_subject if args.prompt_subject is not None else None}")
-    print(f"Initial prompt tokens: {initial_token_count}")
-    print(f"Generated tokens: {args.generation}")
-    print(f"Total tokens: {all_tokens.shape[1]}")
-    #print("-"*80)
-    #print(f"Initial prompt:\n{prompt_text[:500]}{'...' if len(prompt_text) > 500 else ''}")
-    #print("-"*80)
-    #print(f"Complete output:\n{tokenizer.decode(all_tokens[0])}")
-    #print("-"*80)
-    if args.generation > 0:
-        new_tokens = all_tokens[0][initial_token_count:]
-        print(f"Newly generated tokens: {new_tokens.tolist()}")
-        print(f"Newly generated text:\n{tokenizer.decode(new_tokens)}")
-    print("="*80 + "\n")
-
-    print("\n" + "="*80)
-    print("TIMING SUMMARY")
-    print("="*80)
-    print(f"TIMING_START={times['start']:.3f}")
-    print(f"TIMING_MODEL_LOAD={times['model_load']:.3f}")
-    print(f"TIMING_PREFILL={times['prefill']:.3f}")
-    print(f"TIMING_GENERATION={times['generation']:.3f}")
-    print(f"TIMING_EVAL_PPL={times['eval_ppl']:.3f}")
-    print(f"TIMING_EVAL_MMLU={times['eval_mmlu']:.3f}")
-    print(f"TIMING_EVAL_GENERAL_NLP={times['eval_general_nlp']:.3f}")
-    print(f"TIMING_END={times['end']:.3f}")
-    print(f"TIMING_TOTAL={times['end'] - times['start']:.3f}")
-    print("="*80 + "\n")
-
-    if args.maskingStep is not None:
-        if args.save_res_dir is not None:
-            os.makedirs(args.save_res_dir, exist_ok=True)
-        neuronDefuser.save_results(output_dir=args.save_res_dir)
 
     if args.save_model:
         model.save_pretrained(args.save_model)
@@ -770,18 +768,192 @@ def evaluate_mmlu_multi_shot(model, tokenizer, device, subjects, max_samples=Non
     return results
 
 def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datasets=None, save_dir=None):
-    """Evaluate general NLP datasets."""
+    """Evaluate general NLP datasets using lm_eval: BoolQ, RTE, HellaSwag, WinoGrande, ARC, OBQA, and full MMLU."""
+    if not LM_EVAL_AVAILABLE:
+        print("Error: lm-evaluation-harness not installed. Skipping evaluation.")
+        return {}
+    
     if save_dir:
-        output_path = os.path.join(save_dir, f"results_general_nlp.json")
+        output_path = os.path.join(save_dir, f"results_comprehensive_eval.json")
     else:
-        output_path = os.path.join(RESULTS_DIR, "general_nlp", f"results.json")
+        output_path = os.path.join(RESULTS_DIR, "general_nlp", f"results_comprehensive_eval.json")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    results = evaluate_general_nlp(model, tokenizer, device, max_samples=max_samples, datasets=datasets)
-
+    # Define default datasets if none provided
+    if datasets is None:
+        datasets = ['boolq', 'rte', 'hellaswag', 'winogrande', 'arc_easy', 'arc_challenge', 'openbookqa','mmlu']
+    
+    # Check if MMLU is requested
+    include_mmlu = 'mmlu' in datasets or any(d.startswith('mmlu_') for d in datasets)
+    
+    # Separate general NLP tasks from MMLU
+    general_tasks = [d for d in datasets if d != 'mmlu' and not d.startswith('mmlu_')]
+    
+    # Build MMLU task list only if requested
+    mmlu_tasks = []
+    if include_mmlu:
+        mmlu_tasks = [f"mmlu_{subject}" for subject in MMLU_SUBJECTS]
+    
+    print("\n" + "="*80)
+    print("COMPREHENSIVE BENCHMARK EVALUATION (lm_eval)")
+    print("="*80)
+    if general_tasks:
+        print(f"General NLP tasks (0-shot): {', '.join(general_tasks)}")
+    if mmlu_tasks:
+        print(f"MMLU subjects (5-shot): {len(MMLU_SUBJECTS)} subjects")
+    print(f"Total tasks: {len(general_tasks) + len(mmlu_tasks)}")
+    print(f"Max samples per task: {max_samples if max_samples else 'All'}")
+    print("="*80 + "\n")
+    
+    # Wrap model for lm_eval
+    wrapped_model = HFLM(
+        pretrained=model,
+        tokenizer=tokenizer,
+        batch_size=1,
+        device=str(device)
+    )
+    
+    # Initialize results
+    general_results = {'results': {}, 'versions': {}, 'config': {}}
+    mmlu_results = {'results': {}, 'versions': {}, 'config': {}}
+    
+    # Run general NLP evaluation (0-shot) only if there are general tasks
+    if general_tasks:
+        print("Running general NLP benchmarks (0-shot)...")
+        general_results = simple_evaluate(
+            model=wrapped_model,
+            model_args=None,
+            tasks=general_tasks,
+            num_fewshot=0,  # Zero-shot for general NLP
+            batch_size=1,
+            device=str(device),
+            limit=max_samples,
+            log_samples=True,
+        )
+    
+    # Run MMLU evaluation (5-shot) only if requested
+    if include_mmlu:
+        print("\nRunning MMLU benchmarks (5-shot)...")
+        mmlu_results = simple_evaluate(
+            model=wrapped_model,
+            model_args=None,
+            tasks=mmlu_tasks,
+            num_fewshot=5,  # 5-shot for MMLU
+            batch_size=1,
+            device=str(device),
+            limit=max_samples,
+            log_samples=True,
+        )
+    
+    # Combine results
+    results = {
+        'results': {**general_results.get('results', {}), **mmlu_results.get('results', {})},
+        'versions': {**general_results.get('versions', {}), **mmlu_results.get('versions', {})},
+        'config': general_results.get('config', {})
+    }
+    
+    # Calculate average MMLU accuracy (both macro and micro)
+    mmlu_accuracies = []
+    total_correct = 0
+    total_samples = 0
+    
+    if include_mmlu:
+        for task_name, metrics in results['results'].items():
+            if task_name.startswith('mmlu_'):
+                acc = metrics.get('acc,none', metrics.get('acc', None))
+                if acc is not None and isinstance(acc, (int, float)):
+                    mmlu_accuracies.append(acc)
+                    
+                    # Try to get sample count for micro-average
+                    # lm_eval typically stores this in the metrics
+                    num_samples = None
+                    if 'alias' in metrics:
+                        # Sometimes stored as part of metadata
+                        num_samples = metrics.get('num_samples', None)
+                    
+                    # Alternative: check for keys that might contain sample count
+                    for key in metrics.keys():
+                        if 'samples' in key.lower() and isinstance(metrics[key], (int, float)):
+                            num_samples = int(metrics[key])
+                            break
+                    
+                    if num_samples is not None and num_samples > 0:
+                        correct = acc * num_samples
+                        total_correct += correct
+                        total_samples += num_samples
+        
+        if mmlu_accuracies:
+            # Macro-average: mean of all accuracies
+            macro_avg = sum(mmlu_accuracies) / len(mmlu_accuracies)
+            
+            results['mmlu_average'] = {
+                'macro_accuracy': macro_avg,  # Mean of all subject accuracies
+                'num_subjects': len(mmlu_accuracies)
+            }
+            
+            # Micro-average: total correct / total questions (if available)
+            if total_samples > 0:
+                micro_avg = total_correct / total_samples
+                results['mmlu_average']['micro_accuracy'] = micro_avg
+                results['mmlu_average']['total_samples'] = total_samples
+                results['mmlu_average']['total_correct'] = int(total_correct)
+    
+    # Save results
     with open(output_path, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(
+            results, 
+            f, 
+            indent=2,
+            default=handle_non_serializable,
+            ensure_ascii=False
+        )
+    
+    # Print summary
+    print("\n" + "="*80)
+    print("EVALUATION RESULTS SUMMARY")
+    print("="*80)
+    
+    if 'results' in results:
+        # Print general NLP results
+        if general_tasks:
+            print("\nGeneral NLP Benchmarks:")
+            for task in general_tasks:
+                if task in results['results']:
+                    metrics = results['results'][task]
+                    acc = metrics.get('acc,none', metrics.get('acc', metrics.get('acc_norm,none', 'N/A')))
+                    if isinstance(acc, float):
+                        print(f"  {task:20s}: {acc*100:.2f}%")
+                    else:
+                        print(f"  {task:20s}: {acc}")
+        
+        # Print MMLU results (first 10 as preview)
+        if include_mmlu:
+            print("\nMMLU Results (sample - first 10 subjects):")
+            mmlu_results_list = [(k, v) for k, v in results['results'].items() if k.startswith('mmlu_')]
+            for task, metrics in mmlu_results_list[:10]:
+                acc = metrics.get('acc,none', metrics.get('acc', 'N/A'))
+                if isinstance(acc, float):
+                    print(f"  {task:50s}: {acc*100:.2f}%")
+                else:
+                    print(f"  {task:50s}: {acc}")
+            
+            if len(mmlu_results_list) > 10:
+                print(f"  ... and {len(mmlu_results_list) - 10} more MMLU subjects")
+            
+            # Print average MMLU accuracy
+            if 'mmlu_average' in results:
+                avg_info = results['mmlu_average']
+                print(f"\nMMLU Average:")
+                print(f"  Macro (mean of accuracies): {avg_info['macro_accuracy']*100:.2f}% ({avg_info['num_subjects']} subjects)")
+                if 'micro_accuracy' in avg_info:
+                    print(f"  Micro (total correct/total): {avg_info['micro_accuracy']*100:.2f}% ({avg_info['total_correct']}/{avg_info['total_samples']})")
+    
+    print("\n" + "="*80)
+    print(f"Comprehensive evaluation complete!")
     print(f"Results saved to: {output_path}")
+    print("="*80 + "\n")
+    
+    return results
 
 if __name__ == '__main__':
     main()

@@ -71,17 +71,30 @@ def get_mmlu_prompt(subject, max_samples=None):
 def get_mmlu_prompt_concat(subject, max_samples=None):
     """
     Get MMLU prompts as a SINGLE concatenated string.
-    Optionally limit by character count for consistency with custom datasets.
+    Supports multiple space-separated subjects.
     
     Args:
-        subject: MMLU subject name
-        max_samples: Maximum number of questions to include
-        max_chars: Maximum total character length (None = no limit)
+        subject: MMLU subject name(s). Can be a single subject or space-separated subjects
+                 e.g., "abstract_algebra" or "abstract_algebra anatomy astronomy"
+        max_samples: Maximum number of questions to include per subject
     
     Returns:
-        str: Concatenated prompts, truncated to max_chars if specified
+        str: Concatenated prompts from all specified subjects
     """
-    prompts = get_mmlu_prompt(subject, max_samples)
-    concatenated = "\n\n".join(prompts)
+    # Check if multiple subjects are provided (space-separated)
+    if ' ' in subject:
+        # Handle multiple subjects
+        subjects = subject.split()
+        all_prompts = []
+        for subj in subjects:
+            subj = subj.strip()
+            if subj:  # Skip empty strings
+                prompts = get_mmlu_prompt(subj, max_samples)
+                all_prompts.extend(prompts)
+        concatenated = "\n\n".join(all_prompts)
+    else:
+        # Handle single subject (backward compatible)
+        prompts = get_mmlu_prompt(subject, max_samples)
+        concatenated = "\n\n".join(prompts)
     
     return concatenated
