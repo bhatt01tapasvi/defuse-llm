@@ -1,0 +1,1720 @@
+{
+  "nodes": [
+    {
+      "id": "ActorRole"
+    },
+    {
+      "id": "ArtForm"
+    },
+    {
+      "id": "Barcelona"
+    },
+    {
+      "id": "Brazil"
+    },
+    {
+      "id": "CRISPR gene editing"
+    },
+    {
+      "id": "CulturalPractice"
+    },
+    {
+      "id": "Data Scientist"
+    },
+    {
+      "id": "Earth observation"
+    },
+    {
+      "id": "East Asia"
+    },
+    {
+      "id": "EconomicConcept"
+    },
+    {
+      "id": "Economist"
+    },
+    {
+      "id": "EducationTheme"
+    },
+    {
+      "id": "EnvironmentIssue"
+    },
+    {
+      "id": "EthicalIssue"
+    },
+    {
+      "id": "Ethicist"
+    },
+    {
+      "id": "Germany"
+    },
+    {
+      "id": "HealthCondition"
+    },
+    {
+      "id": "ImpactDomain"
+    },
+    {
+      "id": "Impressionist painting"
+    },
+    {
+      "id": "India"
+    },
+    {
+      "id": "Italy"
+    },
+    {
+      "id": "Japan"
+    },
+    {
+      "id": "Location"
+    },
+    {
+      "id": "Morocco"
+    },
+    {
+      "id": "Mumbai"
+    },
+    {
+      "id": "Nairobi"
+    },
+    {
+      "id": "PolicyInstrument"
+    },
+    {
+      "id": "PopulationGroup"
+    },
+    {
+      "id": "Privacy Lawyer"
+    },
+    {
+      "id": "Psychologist"
+    },
+    {
+      "id": "Public Health Researcher"
+    },
+    {
+      "id": "Robotics Engineer"
+    },
+    {
+      "id": "STEM education"
+    },
+    {
+      "id": "Scandinavia"
+    },
+    {
+      "id": "Science"
+    },
+    {
+      "id": "Sector"
+    },
+    {
+      "id": "Singapore"
+    },
+    {
+      "id": "South Korea"
+    },
+    {
+      "id": "Technology"
+    },
+    {
+      "id": "USA"
+    },
+    {
+      "id": "Urban Planner"
+    },
+    {
+      "id": "Vancouver"
+    },
+    {
+      "id": "West Africa"
+    },
+    {
+      "id": "a coastal village"
+    },
+    {
+      "id": "a desert oasis"
+    },
+    {
+      "id": "a mountain hamlet"
+    },
+    {
+      "id": "a river valley"
+    },
+    {
+      "id": "agriculture"
+    },
+    {
+      "id": "air pollution"
+    },
+    {
+      "id": "algorithmic accountability laws"
+    },
+    {
+      "id": "algorithmic bias"
+    },
+    {
+      "id": "antitrust enforcement"
+    },
+    {
+      "id": "anxiety"
+    },
+    {
+      "id": "apply_to_sector_plus_policy"
+    },
+    {
+      "id": "apply_to_sector_plus_policy:CONCEPT"
+    },
+    {
+      "id": "apply_to_sector_plus_policy:POLICY"
+    },
+    {
+      "id": "apply_to_sector_plus_policy:SECTOR"
+    },
+    {
+      "id": "artisan crafts"
+    },
+    {
+      "id": "assessment methods"
+    },
+    {
+      "id": "autonomous systems"
+    },
+    {
+      "id": "behavioral biases"
+    },
+    {
+      "id": "biometric privacy"
+    },
+    {
+      "id": "blockchain"
+    },
+    {
+      "id": "cancer"
+    },
+    {
+      "id": "carbon pricing"
+    },
+    {
+      "id": "cardiovascular disease"
+    },
+    {
+      "id": "cause_effect_mitigation"
+    },
+    {
+      "id": "cause_effect_mitigation:IMPACT"
+    },
+    {
+      "id": "cause_effect_mitigation:ISSUE"
+    },
+    {
+      "id": "cause_effect_mitigation:LOCATION"
+    },
+    {
+      "id": "classical music"
+    },
+    {
+      "id": "clinical_vs_public_health_plus_norms"
+    },
+    {
+      "id": "clinical_vs_public_health_plus_norms:CLINICAL"
+    },
+    {
+      "id": "clinical_vs_public_health_plus_norms:COMMUNITY"
+    },
+    {
+      "id": "clinical_vs_public_health_plus_norms:PUBLIC_HEALTH"
+    },
+    {
+      "id": "coastal flooding"
+    },
+    {
+      "id": "community trust"
+    },
+    {
+      "id": "commuters"
+    },
+    {
+      "id": "compare_and_user_impact"
+    },
+    {
+      "id": "compare_and_user_impact:A"
+    },
+    {
+      "id": "compare_and_user_impact:B"
+    },
+    {
+      "id": "compare_and_user_impact:GROUP"
+    },
+    {
+      "id": "compare_and_user_impact:IMPACT"
+    },
+    {
+      "id": "computer vision"
+    },
+    {
+      "id": "credit scoring"
+    },
+    {
+      "id": "curriculum design"
+    },
+    {
+      "id": "data protection regulation"
+    },
+    {
+      "id": "data_system_plus_art_reflection"
+    },
+    {
+      "id": "data_system_plus_art_reflection:ART"
+    },
+    {
+      "id": "data_system_plus_art_reflection:SYSTEM"
+    },
+    {
+      "id": "debate_roles_summary"
+    },
+    {
+      "id": "debate_roles_summary:IMPACT"
+    },
+    {
+      "id": "debate_roles_summary:ROLE_A"
+    },
+    {
+      "id": "debate_roles_summary:ROLE_B"
+    },
+    {
+      "id": "debate_roles_summary:TOPIC"
+    },
+    {
+      "id": "deforestation"
+    },
+    {
+      "id": "depression"
+    },
+    {
+      "id": "diabetes"
+    },
+    {
+      "id": "digital divide"
+    },
+    {
+      "id": "digital literacy"
+    },
+    {
+      "id": "e-commerce"
+    },
+    {
+      "id": "edge computing"
+    },
+    {
+      "id": "education access"
+    },
+    {
+      "id": "employment"
+    },
+    {
+      "id": "environmental quality"
+    },
+    {
+      "id": "epidemiology"
+    },
+    {
+      "id": "explain_plus_culture"
+    },
+    {
+      "id": "explain_plus_culture:CULTURE"
+    },
+    {
+      "id": "explain_plus_culture:LOCATION"
+    },
+    {
+      "id": "explain_plus_culture:SUBJECT"
+    },
+    {
+      "id": "factory workers"
+    },
+    {
+      "id": "finance"
+    },
+    {
+      "id": "folk music"
+    },
+    {
+      "id": "governance_plus_algorithm_transparency"
+    },
+    {
+      "id": "governance_plus_algorithm_transparency:ETHICS"
+    },
+    {
+      "id": "governance_plus_algorithm_transparency:IMPACT"
+    },
+    {
+      "id": "governance_plus_algorithm_transparency:PLATFORM"
+    },
+    {
+      "id": "healthcare"
+    },
+    {
+      "id": "household energy use"
+    },
+    {
+      "id": "how_to_plus_unrelated_sidebar"
+    },
+    {
+      "id": "how_to_plus_unrelated_sidebar:SIDEBAR_CULTURE"
+    },
+    {
+      "id": "how_to_plus_unrelated_sidebar:SIDEBAR_LOCATION"
+    },
+    {
+      "id": "how_to_plus_unrelated_sidebar:WORKFLOW"
+    },
+    {
+      "id": "inclusive pedagogy"
+    },
+    {
+      "id": "inflation"
+    },
+    {
+      "id": "informed consent"
+    },
+    {
+      "id": "labor productivity"
+    },
+    {
+      "id": "large language models"
+    },
+    {
+      "id": "manufacturing"
+    },
+    {
+      "id": "materials science"
+    },
+    {
+      "id": "media and entertainment"
+    },
+    {
+      "id": "mental health"
+    },
+    {
+      "id": "modern sculpture"
+    },
+    {
+      "id": "narrative_plus_technical_anchor"
+    },
+    {
+      "id": "narrative_plus_technical_anchor:EVENT_GROUP"
+    },
+    {
+      "id": "narrative_plus_technical_anchor:LOCATION"
+    },
+    {
+      "id": "narrative_plus_technical_anchor:TECH"
+    },
+    {
+      "id": "neural networks"
+    },
+    {
+      "id": "older adults"
+    },
+    {
+      "id": "patients"
+    },
+    {
+      "id": "photography"
+    },
+    {
+      "id": "photosynthesis"
+    },
+    {
+      "id": "policy_brief_plus_enforcement"
+    },
+    {
+      "id": "policy_brief_plus_enforcement:LOCATION"
+    },
+    {
+      "id": "policy_brief_plus_enforcement:POLICY"
+    },
+    {
+      "id": "policy_brief_plus_enforcement:SYSTEM"
+    },
+    {
+      "id": "privacy"
+    },
+    {
+      "id": "public administration"
+    },
+    {
+      "id": "public health mandates"
+    },
+    {
+      "id": "quantum computing"
+    },
+    {
+      "id": "radiofrequency communication"
+    },
+    {
+      "id": "remote teams"
+    },
+    {
+      "id": "respiratory illness"
+    },
+    {
+      "id": "risk management"
+    },
+    {
+      "id": "small business owners"
+    },
+    {
+      "id": "smart grids"
+    },
+    {
+      "id": "street festivals"
+    },
+    {
+      "id": "students"
+    },
+    {
+      "id": "supply and demand"
+    },
+    {
+      "id": "surrealist film"
+    },
+    {
+      "id": "surveillance"
+    },
+    {
+      "id": "tea ceremonies"
+    },
+    {
+      "id": "teenagers"
+    },
+    {
+      "id": "the Andes"
+    },
+    {
+      "id": "the Mediterranean"
+    },
+    {
+      "id": "thermodynamics"
+    },
+    {
+      "id": "timeline_discovery_to_ethics"
+    },
+    {
+      "id": "timeline_discovery_to_ethics:DISCOVERY"
+    },
+    {
+      "id": "timeline_discovery_to_ethics:ETHICS"
+    },
+    {
+      "id": "timeline_discovery_to_ethics:SECTOR"
+    },
+    {
+      "id": "traditional cuisine"
+    },
+    {
+      "id": "transportation"
+    },
+    {
+      "id": "urban heat islands"
+    },
+    {
+      "id": "water scarcity"
+    },
+    {
+      "id": "wildfires"
+    }
+  ],
+  "links": [
+    {
+      "source": "data_system_plus_art_reflection",
+      "target": "data_system_plus_art_reflection:SYSTEM",
+      "value": 62
+    },
+    {
+      "source": "data_system_plus_art_reflection",
+      "target": "data_system_plus_art_reflection:ART",
+      "value": 62
+    },
+    {
+      "source": "clinical_vs_public_health_plus_norms",
+      "target": "clinical_vs_public_health_plus_norms:CLINICAL",
+      "value": 41
+    },
+    {
+      "source": "clinical_vs_public_health_plus_norms",
+      "target": "clinical_vs_public_health_plus_norms:PUBLIC_HEALTH",
+      "value": 41
+    },
+    {
+      "source": "clinical_vs_public_health_plus_norms",
+      "target": "clinical_vs_public_health_plus_norms:COMMUNITY",
+      "value": 41
+    },
+    {
+      "source": "apply_to_sector_plus_policy",
+      "target": "apply_to_sector_plus_policy:CONCEPT",
+      "value": 36
+    },
+    {
+      "source": "apply_to_sector_plus_policy",
+      "target": "apply_to_sector_plus_policy:SECTOR",
+      "value": 36
+    },
+    {
+      "source": "apply_to_sector_plus_policy",
+      "target": "apply_to_sector_plus_policy:POLICY",
+      "value": 36
+    },
+    {
+      "source": "compare_and_user_impact",
+      "target": "compare_and_user_impact:A",
+      "value": 32
+    },
+    {
+      "source": "compare_and_user_impact",
+      "target": "compare_and_user_impact:B",
+      "value": 32
+    },
+    {
+      "source": "compare_and_user_impact",
+      "target": "compare_and_user_impact:IMPACT",
+      "value": 32
+    },
+    {
+      "source": "compare_and_user_impact",
+      "target": "compare_and_user_impact:GROUP",
+      "value": 32
+    },
+    {
+      "source": "governance_plus_algorithm_transparency",
+      "target": "governance_plus_algorithm_transparency:PLATFORM",
+      "value": 43
+    },
+    {
+      "source": "governance_plus_algorithm_transparency",
+      "target": "governance_plus_algorithm_transparency:ETHICS",
+      "value": 43
+    },
+    {
+      "source": "governance_plus_algorithm_transparency",
+      "target": "governance_plus_algorithm_transparency:IMPACT",
+      "value": 43
+    },
+    {
+      "source": "cause_effect_mitigation",
+      "target": "cause_effect_mitigation:ISSUE",
+      "value": 31
+    },
+    {
+      "source": "cause_effect_mitigation",
+      "target": "cause_effect_mitigation:IMPACT",
+      "value": 31
+    },
+    {
+      "source": "cause_effect_mitigation",
+      "target": "cause_effect_mitigation:LOCATION",
+      "value": 31
+    },
+    {
+      "source": "explain_plus_culture",
+      "target": "explain_plus_culture:SUBJECT",
+      "value": 36
+    },
+    {
+      "source": "explain_plus_culture",
+      "target": "explain_plus_culture:CULTURE",
+      "value": 36
+    },
+    {
+      "source": "explain_plus_culture",
+      "target": "explain_plus_culture:LOCATION",
+      "value": 36
+    },
+    {
+      "source": "narrative_plus_technical_anchor",
+      "target": "narrative_plus_technical_anchor:EVENT_GROUP",
+      "value": 37
+    },
+    {
+      "source": "narrative_plus_technical_anchor",
+      "target": "narrative_plus_technical_anchor:TECH",
+      "value": 37
+    },
+    {
+      "source": "narrative_plus_technical_anchor",
+      "target": "narrative_plus_technical_anchor:LOCATION",
+      "value": 37
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar",
+      "target": "how_to_plus_unrelated_sidebar:WORKFLOW",
+      "value": 51
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar",
+      "target": "how_to_plus_unrelated_sidebar:SIDEBAR_LOCATION",
+      "value": 51
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar",
+      "target": "how_to_plus_unrelated_sidebar:SIDEBAR_CULTURE",
+      "value": 51
+    },
+    {
+      "source": "timeline_discovery_to_ethics",
+      "target": "timeline_discovery_to_ethics:DISCOVERY",
+      "value": 39
+    },
+    {
+      "source": "timeline_discovery_to_ethics",
+      "target": "timeline_discovery_to_ethics:SECTOR",
+      "value": 39
+    },
+    {
+      "source": "timeline_discovery_to_ethics",
+      "target": "timeline_discovery_to_ethics:ETHICS",
+      "value": 39
+    },
+    {
+      "source": "debate_roles_summary",
+      "target": "debate_roles_summary:ROLE_A",
+      "value": 50
+    },
+    {
+      "source": "debate_roles_summary",
+      "target": "debate_roles_summary:ROLE_B",
+      "value": 50
+    },
+    {
+      "source": "debate_roles_summary",
+      "target": "debate_roles_summary:TOPIC",
+      "value": 50
+    },
+    {
+      "source": "debate_roles_summary",
+      "target": "debate_roles_summary:IMPACT",
+      "value": 50
+    },
+    {
+      "source": "policy_brief_plus_enforcement",
+      "target": "policy_brief_plus_enforcement:POLICY",
+      "value": 42
+    },
+    {
+      "source": "policy_brief_plus_enforcement",
+      "target": "policy_brief_plus_enforcement:SYSTEM",
+      "value": 42
+    },
+    {
+      "source": "policy_brief_plus_enforcement",
+      "target": "policy_brief_plus_enforcement:LOCATION",
+      "value": 42
+    },
+    {
+      "source": "data_system_plus_art_reflection:SYSTEM",
+      "target": "Technology",
+      "value": 62
+    },
+    {
+      "source": "data_system_plus_art_reflection:ART",
+      "target": "ArtForm",
+      "value": 62
+    },
+    {
+      "source": "clinical_vs_public_health_plus_norms:CLINICAL",
+      "target": "HealthCondition",
+      "value": 41
+    },
+    {
+      "source": "clinical_vs_public_health_plus_norms:PUBLIC_HEALTH",
+      "target": "PolicyInstrument",
+      "value": 41
+    },
+    {
+      "source": "clinical_vs_public_health_plus_norms:COMMUNITY",
+      "target": "Location",
+      "value": 41
+    },
+    {
+      "source": "apply_to_sector_plus_policy:CONCEPT",
+      "target": "Science",
+      "value": 18
+    },
+    {
+      "source": "apply_to_sector_plus_policy:SECTOR",
+      "target": "Sector",
+      "value": 36
+    },
+    {
+      "source": "apply_to_sector_plus_policy:POLICY",
+      "target": "PolicyInstrument",
+      "value": 36
+    },
+    {
+      "source": "compare_and_user_impact:A",
+      "target": "EconomicConcept",
+      "value": 9
+    },
+    {
+      "source": "compare_and_user_impact:B",
+      "target": "Science",
+      "value": 12
+    },
+    {
+      "source": "compare_and_user_impact:IMPACT",
+      "target": "ImpactDomain",
+      "value": 32
+    },
+    {
+      "source": "compare_and_user_impact:GROUP",
+      "target": "PopulationGroup",
+      "value": 32
+    },
+    {
+      "source": "compare_and_user_impact:A",
+      "target": "Technology",
+      "value": 9
+    },
+    {
+      "source": "compare_and_user_impact:B",
+      "target": "Technology",
+      "value": 14
+    },
+    {
+      "source": "governance_plus_algorithm_transparency:PLATFORM",
+      "target": "Technology",
+      "value": 43
+    },
+    {
+      "source": "governance_plus_algorithm_transparency:ETHICS",
+      "target": "EthicalIssue",
+      "value": 43
+    },
+    {
+      "source": "governance_plus_algorithm_transparency:IMPACT",
+      "target": "ImpactDomain",
+      "value": 43
+    },
+    {
+      "source": "cause_effect_mitigation:ISSUE",
+      "target": "EthicalIssue",
+      "value": 13
+    },
+    {
+      "source": "cause_effect_mitigation:IMPACT",
+      "target": "ImpactDomain",
+      "value": 31
+    },
+    {
+      "source": "cause_effect_mitigation:LOCATION",
+      "target": "Location",
+      "value": 31
+    },
+    {
+      "source": "explain_plus_culture:SUBJECT",
+      "target": "Science",
+      "value": 15
+    },
+    {
+      "source": "explain_plus_culture:CULTURE",
+      "target": "CulturalPractice",
+      "value": 36
+    },
+    {
+      "source": "explain_plus_culture:LOCATION",
+      "target": "Location",
+      "value": 36
+    },
+    {
+      "source": "narrative_plus_technical_anchor:EVENT_GROUP",
+      "target": "PopulationGroup",
+      "value": 37
+    },
+    {
+      "source": "narrative_plus_technical_anchor:TECH",
+      "target": "Technology",
+      "value": 37
+    },
+    {
+      "source": "narrative_plus_technical_anchor:LOCATION",
+      "target": "Location",
+      "value": 37
+    },
+    {
+      "source": "cause_effect_mitigation:ISSUE",
+      "target": "HealthCondition",
+      "value": 8
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar:WORKFLOW",
+      "target": "Sector",
+      "value": 31
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar:SIDEBAR_LOCATION",
+      "target": "Location",
+      "value": 51
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar:SIDEBAR_CULTURE",
+      "target": "CulturalPractice",
+      "value": 51
+    },
+    {
+      "source": "timeline_discovery_to_ethics:DISCOVERY",
+      "target": "Science",
+      "value": 39
+    },
+    {
+      "source": "timeline_discovery_to_ethics:SECTOR",
+      "target": "Sector",
+      "value": 39
+    },
+    {
+      "source": "timeline_discovery_to_ethics:ETHICS",
+      "target": "EthicalIssue",
+      "value": 39
+    },
+    {
+      "source": "debate_roles_summary:ROLE_A",
+      "target": "ActorRole",
+      "value": 50
+    },
+    {
+      "source": "debate_roles_summary:ROLE_B",
+      "target": "ActorRole",
+      "value": 50
+    },
+    {
+      "source": "debate_roles_summary:TOPIC",
+      "target": "EthicalIssue",
+      "value": 14
+    },
+    {
+      "source": "debate_roles_summary:IMPACT",
+      "target": "ImpactDomain",
+      "value": 50
+    },
+    {
+      "source": "debate_roles_summary:TOPIC",
+      "target": "Technology",
+      "value": 20
+    },
+    {
+      "source": "how_to_plus_unrelated_sidebar:WORKFLOW",
+      "target": "EducationTheme",
+      "value": 20
+    },
+    {
+      "source": "debate_roles_summary:TOPIC",
+      "target": "PolicyInstrument",
+      "value": 16
+    },
+    {
+      "source": "policy_brief_plus_enforcement:POLICY",
+      "target": "PolicyInstrument",
+      "value": 42
+    },
+    {
+      "source": "policy_brief_plus_enforcement:SYSTEM",
+      "target": "Technology",
+      "value": 42
+    },
+    {
+      "source": "policy_brief_plus_enforcement:LOCATION",
+      "target": "Location",
+      "value": 42
+    },
+    {
+      "source": "compare_and_user_impact:B",
+      "target": "EconomicConcept",
+      "value": 6
+    },
+    {
+      "source": "compare_and_user_impact:A",
+      "target": "Science",
+      "value": 14
+    },
+    {
+      "source": "cause_effect_mitigation:ISSUE",
+      "target": "EnvironmentIssue",
+      "value": 10
+    },
+    {
+      "source": "apply_to_sector_plus_policy:CONCEPT",
+      "target": "Technology",
+      "value": 18
+    },
+    {
+      "source": "explain_plus_culture:SUBJECT",
+      "target": "Technology",
+      "value": 21
+    },
+    {
+      "source": "Technology",
+      "target": "edge computing",
+      "value": 36
+    },
+    {
+      "source": "ArtForm",
+      "target": "Impressionist painting",
+      "value": 12
+    },
+    {
+      "source": "HealthCondition",
+      "target": "cardiovascular disease",
+      "value": 9
+    },
+    {
+      "source": "PolicyInstrument",
+      "target": "carbon pricing",
+      "value": 30
+    },
+    {
+      "source": "Location",
+      "target": "East Asia",
+      "value": 17
+    },
+    {
+      "source": "Science",
+      "target": "radiofrequency communication",
+      "value": 13
+    },
+    {
+      "source": "Sector",
+      "target": "finance",
+      "value": 15
+    },
+    {
+      "source": "PolicyInstrument",
+      "target": "antitrust enforcement",
+      "value": 23
+    },
+    {
+      "source": "EconomicConcept",
+      "target": "risk management",
+      "value": 2
+    },
+    {
+      "source": "Science",
+      "target": "epidemiology",
+      "value": 10
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "mental health",
+      "value": 21
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "commuters",
+      "value": 7
+    },
+    {
+      "source": "Technology",
+      "target": "large language models",
+      "value": 29
+    },
+    {
+      "source": "Technology",
+      "target": "smart grids",
+      "value": 30
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "education access",
+      "value": 26
+    },
+    {
+      "source": "Technology",
+      "target": "quantum computing",
+      "value": 36
+    },
+    {
+      "source": "EthicalIssue",
+      "target": "digital divide",
+      "value": 19
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "household energy use",
+      "value": 23
+    },
+    {
+      "source": "EthicalIssue",
+      "target": "biometric privacy",
+      "value": 24
+    },
+    {
+      "source": "Location",
+      "target": "Singapore",
+      "value": 6
+    },
+    {
+      "source": "Science",
+      "target": "materials science",
+      "value": 15
+    },
+    {
+      "source": "CulturalPractice",
+      "target": "street festivals",
+      "value": 18
+    },
+    {
+      "source": "Location",
+      "target": "Morocco",
+      "value": 14
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "remote teams",
+      "value": 11
+    },
+    {
+      "source": "Technology",
+      "target": "autonomous systems",
+      "value": 31
+    },
+    {
+      "source": "Location",
+      "target": "USA",
+      "value": 14
+    },
+    {
+      "source": "HealthCondition",
+      "target": "anxiety",
+      "value": 7
+    },
+    {
+      "source": "Location",
+      "target": "India",
+      "value": 8
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "patients",
+      "value": 9
+    },
+    {
+      "source": "Technology",
+      "target": "computer vision",
+      "value": 36
+    },
+    {
+      "source": "Location",
+      "target": "Vancouver",
+      "value": 10
+    },
+    {
+      "source": "Sector",
+      "target": "e-commerce",
+      "value": 19
+    },
+    {
+      "source": "Location",
+      "target": "Italy",
+      "value": 12
+    },
+    {
+      "source": "CulturalPractice",
+      "target": "traditional cuisine",
+      "value": 15
+    },
+    {
+      "source": "EthicalIssue",
+      "target": "informed consent",
+      "value": 22
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "environmental quality",
+      "value": 25
+    },
+    {
+      "source": "Sector",
+      "target": "agriculture",
+      "value": 9
+    },
+    {
+      "source": "EthicalIssue",
+      "target": "algorithmic bias",
+      "value": 25
+    },
+    {
+      "source": "Science",
+      "target": "thermodynamics",
+      "value": 15
+    },
+    {
+      "source": "Location",
+      "target": "South Korea",
+      "value": 18
+    },
+    {
+      "source": "ActorRole",
+      "target": "Ethicist",
+      "value": 14
+    },
+    {
+      "source": "ActorRole",
+      "target": "Robotics Engineer",
+      "value": 13
+    },
+    {
+      "source": "ActorRole",
+      "target": "Privacy Lawyer",
+      "value": 13
+    },
+    {
+      "source": "ActorRole",
+      "target": "Urban Planner",
+      "value": 13
+    },
+    {
+      "source": "Technology",
+      "target": "neural networks",
+      "value": 33
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "employment",
+      "value": 26
+    },
+    {
+      "source": "Science",
+      "target": "photosynthesis",
+      "value": 16
+    },
+    {
+      "source": "EducationTheme",
+      "target": "curriculum design",
+      "value": 6
+    },
+    {
+      "source": "Location",
+      "target": "Germany",
+      "value": 10
+    },
+    {
+      "source": "CulturalPractice",
+      "target": "folk music",
+      "value": 11
+    },
+    {
+      "source": "HealthCondition",
+      "target": "diabetes",
+      "value": 9
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "small business owners",
+      "value": 11
+    },
+    {
+      "source": "Location",
+      "target": "a river valley",
+      "value": 7
+    },
+    {
+      "source": "Science",
+      "target": "Earth observation",
+      "value": 19
+    },
+    {
+      "source": "Sector",
+      "target": "healthcare",
+      "value": 13
+    },
+    {
+      "source": "EthicalIssue",
+      "target": "surveillance",
+      "value": 19
+    },
+    {
+      "source": "CulturalPractice",
+      "target": "artisan crafts",
+      "value": 18
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "privacy",
+      "value": 13
+    },
+    {
+      "source": "ArtForm",
+      "target": "modern sculpture",
+      "value": 12
+    },
+    {
+      "source": "ArtForm",
+      "target": "classical music",
+      "value": 16
+    },
+    {
+      "source": "ActorRole",
+      "target": "Psychologist",
+      "value": 14
+    },
+    {
+      "source": "ActorRole",
+      "target": "Public Health Researcher",
+      "value": 16
+    },
+    {
+      "source": "Science",
+      "target": "CRISPR gene editing",
+      "value": 10
+    },
+    {
+      "source": "Sector",
+      "target": "public administration",
+      "value": 14
+    },
+    {
+      "source": "PolicyInstrument",
+      "target": "data protection regulation",
+      "value": 32
+    },
+    {
+      "source": "CulturalPractice",
+      "target": "tea ceremonies",
+      "value": 25
+    },
+    {
+      "source": "Technology",
+      "target": "blockchain",
+      "value": 35
+    },
+    {
+      "source": "Location",
+      "target": "the Andes",
+      "value": 14
+    },
+    {
+      "source": "ImpactDomain",
+      "target": "community trust",
+      "value": 22
+    },
+    {
+      "source": "HealthCondition",
+      "target": "respiratory illness",
+      "value": 8
+    },
+    {
+      "source": "PolicyInstrument",
+      "target": "public health mandates",
+      "value": 26
+    },
+    {
+      "source": "Sector",
+      "target": "transportation",
+      "value": 12
+    },
+    {
+      "source": "ActorRole",
+      "target": "Economist",
+      "value": 9
+    },
+    {
+      "source": "EconomicConcept",
+      "target": "inflation",
+      "value": 4
+    },
+    {
+      "source": "Location",
+      "target": "West Africa",
+      "value": 13
+    },
+    {
+      "source": "Location",
+      "target": "Brazil",
+      "value": 16
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "factory workers",
+      "value": 9
+    },
+    {
+      "source": "Location",
+      "target": "Japan",
+      "value": 12
+    },
+    {
+      "source": "Location",
+      "target": "Scandinavia",
+      "value": 14
+    },
+    {
+      "source": "EnvironmentIssue",
+      "target": "urban heat islands",
+      "value": 3
+    },
+    {
+      "source": "HealthCondition",
+      "target": "cancer",
+      "value": 5
+    },
+    {
+      "source": "Location",
+      "target": "the Mediterranean",
+      "value": 11
+    },
+    {
+      "source": "EnvironmentIssue",
+      "target": "wildfires",
+      "value": 2
+    },
+    {
+      "source": "PolicyInstrument",
+      "target": "algorithmic accountability laws",
+      "value": 24
+    },
+    {
+      "source": "ActorRole",
+      "target": "Data Scientist",
+      "value": 8
+    },
+    {
+      "source": "Location",
+      "target": "Mumbai",
+      "value": 8
+    },
+    {
+      "source": "HealthCondition",
+      "target": "depression",
+      "value": 11
+    },
+    {
+      "source": "EducationTheme",
+      "target": "assessment methods",
+      "value": 1
+    },
+    {
+      "source": "Location",
+      "target": "Barcelona",
+      "value": 12
+    },
+    {
+      "source": "EconomicConcept",
+      "target": "behavioral biases",
+      "value": 3
+    },
+    {
+      "source": "Location",
+      "target": "a coastal village",
+      "value": 5
+    },
+    {
+      "source": "Location",
+      "target": "a mountain hamlet",
+      "value": 8
+    },
+    {
+      "source": "Sector",
+      "target": "manufacturing",
+      "value": 7
+    },
+    {
+      "source": "ArtForm",
+      "target": "photography",
+      "value": 14
+    },
+    {
+      "source": "EconomicConcept",
+      "target": "credit scoring",
+      "value": 3
+    },
+    {
+      "source": "ArtForm",
+      "target": "surrealist film",
+      "value": 8
+    },
+    {
+      "source": "Sector",
+      "target": "media and entertainment",
+      "value": 17
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "teenagers",
+      "value": 8
+    },
+    {
+      "source": "EducationTheme",
+      "target": "STEM education",
+      "value": 6
+    },
+    {
+      "source": "Location",
+      "target": "a desert oasis",
+      "value": 4
+    },
+    {
+      "source": "Location",
+      "target": "Nairobi",
+      "value": 5
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "older adults",
+      "value": 5
+    },
+    {
+      "source": "EducationTheme",
+      "target": "digital literacy",
+      "value": 4
+    },
+    {
+      "source": "EconomicConcept",
+      "target": "labor productivity",
+      "value": 2
+    },
+    {
+      "source": "EducationTheme",
+      "target": "inclusive pedagogy",
+      "value": 3
+    },
+    {
+      "source": "PopulationGroup",
+      "target": "students",
+      "value": 9
+    },
+    {
+      "source": "EnvironmentIssue",
+      "target": "deforestation",
+      "value": 2
+    },
+    {
+      "source": "EnvironmentIssue",
+      "target": "air pollution",
+      "value": 1
+    },
+    {
+      "source": "EconomicConcept",
+      "target": "supply and demand",
+      "value": 1
+    },
+    {
+      "source": "EnvironmentIssue",
+      "target": "water scarcity",
+      "value": 1
+    },
+    {
+      "source": "EnvironmentIssue",
+      "target": "coastal flooding",
+      "value": 1
+    }
+  ],
+  "raw_data": {
+    "layer_1_to_2": {
+      "data_system_plus_art_reflection -> data_system_plus_art_reflection:SYSTEM": 62,
+      "data_system_plus_art_reflection -> data_system_plus_art_reflection:ART": 62,
+      "clinical_vs_public_health_plus_norms -> clinical_vs_public_health_plus_norms:CLINICAL": 41,
+      "clinical_vs_public_health_plus_norms -> clinical_vs_public_health_plus_norms:PUBLIC_HEALTH": 41,
+      "clinical_vs_public_health_plus_norms -> clinical_vs_public_health_plus_norms:COMMUNITY": 41,
+      "apply_to_sector_plus_policy -> apply_to_sector_plus_policy:CONCEPT": 36,
+      "apply_to_sector_plus_policy -> apply_to_sector_plus_policy:SECTOR": 36,
+      "apply_to_sector_plus_policy -> apply_to_sector_plus_policy:POLICY": 36,
+      "compare_and_user_impact -> compare_and_user_impact:A": 32,
+      "compare_and_user_impact -> compare_and_user_impact:B": 32,
+      "compare_and_user_impact -> compare_and_user_impact:IMPACT": 32,
+      "compare_and_user_impact -> compare_and_user_impact:GROUP": 32,
+      "governance_plus_algorithm_transparency -> governance_plus_algorithm_transparency:PLATFORM": 43,
+      "governance_plus_algorithm_transparency -> governance_plus_algorithm_transparency:ETHICS": 43,
+      "governance_plus_algorithm_transparency -> governance_plus_algorithm_transparency:IMPACT": 43,
+      "cause_effect_mitigation -> cause_effect_mitigation:ISSUE": 31,
+      "cause_effect_mitigation -> cause_effect_mitigation:IMPACT": 31,
+      "cause_effect_mitigation -> cause_effect_mitigation:LOCATION": 31,
+      "explain_plus_culture -> explain_plus_culture:SUBJECT": 36,
+      "explain_plus_culture -> explain_plus_culture:CULTURE": 36,
+      "explain_plus_culture -> explain_plus_culture:LOCATION": 36,
+      "narrative_plus_technical_anchor -> narrative_plus_technical_anchor:EVENT_GROUP": 37,
+      "narrative_plus_technical_anchor -> narrative_plus_technical_anchor:TECH": 37,
+      "narrative_plus_technical_anchor -> narrative_plus_technical_anchor:LOCATION": 37,
+      "how_to_plus_unrelated_sidebar -> how_to_plus_unrelated_sidebar:WORKFLOW": 51,
+      "how_to_plus_unrelated_sidebar -> how_to_plus_unrelated_sidebar:SIDEBAR_LOCATION": 51,
+      "how_to_plus_unrelated_sidebar -> how_to_plus_unrelated_sidebar:SIDEBAR_CULTURE": 51,
+      "timeline_discovery_to_ethics -> timeline_discovery_to_ethics:DISCOVERY": 39,
+      "timeline_discovery_to_ethics -> timeline_discovery_to_ethics:SECTOR": 39,
+      "timeline_discovery_to_ethics -> timeline_discovery_to_ethics:ETHICS": 39,
+      "debate_roles_summary -> debate_roles_summary:ROLE_A": 50,
+      "debate_roles_summary -> debate_roles_summary:ROLE_B": 50,
+      "debate_roles_summary -> debate_roles_summary:TOPIC": 50,
+      "debate_roles_summary -> debate_roles_summary:IMPACT": 50,
+      "policy_brief_plus_enforcement -> policy_brief_plus_enforcement:POLICY": 42,
+      "policy_brief_plus_enforcement -> policy_brief_plus_enforcement:SYSTEM": 42,
+      "policy_brief_plus_enforcement -> policy_brief_plus_enforcement:LOCATION": 42
+    },
+    "layer_2_to_3": {
+      "data_system_plus_art_reflection:SYSTEM -> Technology": 62,
+      "data_system_plus_art_reflection:ART -> ArtForm": 62,
+      "clinical_vs_public_health_plus_norms:CLINICAL -> HealthCondition": 41,
+      "clinical_vs_public_health_plus_norms:PUBLIC_HEALTH -> PolicyInstrument": 41,
+      "clinical_vs_public_health_plus_norms:COMMUNITY -> Location": 41,
+      "apply_to_sector_plus_policy:CONCEPT -> Science": 18,
+      "apply_to_sector_plus_policy:SECTOR -> Sector": 36,
+      "apply_to_sector_plus_policy:POLICY -> PolicyInstrument": 36,
+      "compare_and_user_impact:A -> EconomicConcept": 9,
+      "compare_and_user_impact:B -> Science": 12,
+      "compare_and_user_impact:IMPACT -> ImpactDomain": 32,
+      "compare_and_user_impact:GROUP -> PopulationGroup": 32,
+      "compare_and_user_impact:A -> Technology": 9,
+      "compare_and_user_impact:B -> Technology": 14,
+      "governance_plus_algorithm_transparency:PLATFORM -> Technology": 43,
+      "governance_plus_algorithm_transparency:ETHICS -> EthicalIssue": 43,
+      "governance_plus_algorithm_transparency:IMPACT -> ImpactDomain": 43,
+      "cause_effect_mitigation:ISSUE -> EthicalIssue": 13,
+      "cause_effect_mitigation:IMPACT -> ImpactDomain": 31,
+      "cause_effect_mitigation:LOCATION -> Location": 31,
+      "explain_plus_culture:SUBJECT -> Science": 15,
+      "explain_plus_culture:CULTURE -> CulturalPractice": 36,
+      "explain_plus_culture:LOCATION -> Location": 36,
+      "narrative_plus_technical_anchor:EVENT_GROUP -> PopulationGroup": 37,
+      "narrative_plus_technical_anchor:TECH -> Technology": 37,
+      "narrative_plus_technical_anchor:LOCATION -> Location": 37,
+      "cause_effect_mitigation:ISSUE -> HealthCondition": 8,
+      "how_to_plus_unrelated_sidebar:WORKFLOW -> Sector": 31,
+      "how_to_plus_unrelated_sidebar:SIDEBAR_LOCATION -> Location": 51,
+      "how_to_plus_unrelated_sidebar:SIDEBAR_CULTURE -> CulturalPractice": 51,
+      "timeline_discovery_to_ethics:DISCOVERY -> Science": 39,
+      "timeline_discovery_to_ethics:SECTOR -> Sector": 39,
+      "timeline_discovery_to_ethics:ETHICS -> EthicalIssue": 39,
+      "debate_roles_summary:ROLE_A -> ActorRole": 50,
+      "debate_roles_summary:ROLE_B -> ActorRole": 50,
+      "debate_roles_summary:TOPIC -> EthicalIssue": 14,
+      "debate_roles_summary:IMPACT -> ImpactDomain": 50,
+      "debate_roles_summary:TOPIC -> Technology": 20,
+      "how_to_plus_unrelated_sidebar:WORKFLOW -> EducationTheme": 20,
+      "debate_roles_summary:TOPIC -> PolicyInstrument": 16,
+      "policy_brief_plus_enforcement:POLICY -> PolicyInstrument": 42,
+      "policy_brief_plus_enforcement:SYSTEM -> Technology": 42,
+      "policy_brief_plus_enforcement:LOCATION -> Location": 42,
+      "compare_and_user_impact:B -> EconomicConcept": 6,
+      "compare_and_user_impact:A -> Science": 14,
+      "cause_effect_mitigation:ISSUE -> EnvironmentIssue": 10,
+      "apply_to_sector_plus_policy:CONCEPT -> Technology": 18,
+      "explain_plus_culture:SUBJECT -> Technology": 21
+    },
+    "layer_3_to_4": {
+      "Technology -> edge computing": 36,
+      "ArtForm -> Impressionist painting": 12,
+      "HealthCondition -> cardiovascular disease": 9,
+      "PolicyInstrument -> carbon pricing": 30,
+      "Location -> East Asia": 17,
+      "Science -> radiofrequency communication": 13,
+      "Sector -> finance": 15,
+      "PolicyInstrument -> antitrust enforcement": 23,
+      "EconomicConcept -> risk management": 2,
+      "Science -> epidemiology": 10,
+      "ImpactDomain -> mental health": 21,
+      "PopulationGroup -> commuters": 7,
+      "Technology -> large language models": 29,
+      "Technology -> smart grids": 30,
+      "ImpactDomain -> education access": 26,
+      "Technology -> quantum computing": 36,
+      "EthicalIssue -> digital divide": 19,
+      "ImpactDomain -> household energy use": 23,
+      "EthicalIssue -> biometric privacy": 24,
+      "Location -> Singapore": 6,
+      "Science -> materials science": 15,
+      "CulturalPractice -> street festivals": 18,
+      "Location -> Morocco": 14,
+      "PopulationGroup -> remote teams": 11,
+      "Technology -> autonomous systems": 31,
+      "Location -> USA": 14,
+      "HealthCondition -> anxiety": 7,
+      "Location -> India": 8,
+      "PopulationGroup -> patients": 9,
+      "Technology -> computer vision": 36,
+      "Location -> Vancouver": 10,
+      "Sector -> e-commerce": 19,
+      "Location -> Italy": 12,
+      "CulturalPractice -> traditional cuisine": 15,
+      "EthicalIssue -> informed consent": 22,
+      "ImpactDomain -> environmental quality": 25,
+      "Sector -> agriculture": 9,
+      "EthicalIssue -> algorithmic bias": 25,
+      "Science -> thermodynamics": 15,
+      "Location -> South Korea": 18,
+      "ActorRole -> Ethicist": 14,
+      "ActorRole -> Robotics Engineer": 13,
+      "ActorRole -> Privacy Lawyer": 13,
+      "ActorRole -> Urban Planner": 13,
+      "Technology -> neural networks": 33,
+      "ImpactDomain -> employment": 26,
+      "Science -> photosynthesis": 16,
+      "EducationTheme -> curriculum design": 6,
+      "Location -> Germany": 10,
+      "CulturalPractice -> folk music": 11,
+      "HealthCondition -> diabetes": 9,
+      "PopulationGroup -> small business owners": 11,
+      "Location -> a river valley": 7,
+      "Science -> Earth observation": 19,
+      "Sector -> healthcare": 13,
+      "EthicalIssue -> surveillance": 19,
+      "CulturalPractice -> artisan crafts": 18,
+      "ImpactDomain -> privacy": 13,
+      "ArtForm -> modern sculpture": 12,
+      "ArtForm -> classical music": 16,
+      "ActorRole -> Psychologist": 14,
+      "ActorRole -> Public Health Researcher": 16,
+      "Science -> CRISPR gene editing": 10,
+      "Sector -> public administration": 14,
+      "PolicyInstrument -> data protection regulation": 32,
+      "CulturalPractice -> tea ceremonies": 25,
+      "Technology -> blockchain": 35,
+      "Location -> the Andes": 14,
+      "ImpactDomain -> community trust": 22,
+      "HealthCondition -> respiratory illness": 8,
+      "PolicyInstrument -> public health mandates": 26,
+      "Sector -> transportation": 12,
+      "ActorRole -> Economist": 9,
+      "EconomicConcept -> inflation": 4,
+      "Location -> West Africa": 13,
+      "Location -> Brazil": 16,
+      "PopulationGroup -> factory workers": 9,
+      "Location -> Japan": 12,
+      "Location -> Scandinavia": 14,
+      "EnvironmentIssue -> urban heat islands": 3,
+      "HealthCondition -> cancer": 5,
+      "Location -> the Mediterranean": 11,
+      "EnvironmentIssue -> wildfires": 2,
+      "PolicyInstrument -> algorithmic accountability laws": 24,
+      "ActorRole -> Data Scientist": 8,
+      "Location -> Mumbai": 8,
+      "HealthCondition -> depression": 11,
+      "EducationTheme -> assessment methods": 1,
+      "Location -> Barcelona": 12,
+      "EconomicConcept -> behavioral biases": 3,
+      "Location -> a coastal village": 5,
+      "Location -> a mountain hamlet": 8,
+      "Sector -> manufacturing": 7,
+      "ArtForm -> photography": 14,
+      "EconomicConcept -> credit scoring": 3,
+      "ArtForm -> surrealist film": 8,
+      "Sector -> media and entertainment": 17,
+      "PopulationGroup -> teenagers": 8,
+      "EducationTheme -> STEM education": 6,
+      "Location -> a desert oasis": 4,
+      "Location -> Nairobi": 5,
+      "PopulationGroup -> older adults": 5,
+      "EducationTheme -> digital literacy": 4,
+      "EconomicConcept -> labor productivity": 2,
+      "EducationTheme -> inclusive pedagogy": 3,
+      "PopulationGroup -> students": 9,
+      "EnvironmentIssue -> deforestation": 2,
+      "EnvironmentIssue -> air pollution": 1,
+      "EconomicConcept -> supply and demand": 1,
+      "EnvironmentIssue -> water scarcity": 1,
+      "EnvironmentIssue -> coastal flooding": 1
+    },
+    "summary": {
+      "total_template_slot_connections": 37,
+      "total_slot_domain_connections": 48,
+      "total_domain_item_connections": 111
+    }
+  }
+}

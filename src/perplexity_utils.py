@@ -36,44 +36,46 @@ def calculate_perplexity(model, tokenizer, texts: list[str], max_length: int = 5
     """Calculate perplexity using sliding window approach for long texts."""
     model.eval()
     
+    # Join all texts into one continuous sequence (standard evaluation protocol)
+    # Filter out None and empty texts before processing
+    valid_texts = [text for text in texts if text is not None]
+    full_text = "\n\n".join([text.strip() for text in valid_texts if text.strip()])
+    
+    # Tokenize the full text
+    encodings = tokenizer(full_text, return_tensors="pt", truncation=False, add_special_tokens=True)
+    input_ids = encodings.input_ids[0].to(device)
+    seq_len = input_ids.size(0)
+    
+    if seq_len < 2:
+        return float('inf')
+    
     total_loss = 0.0
     total_tokens = 0
     
-    for text in texts:
-        if not text.strip():
-            continue
+    prev_end = 0
+    for begin in range(0, seq_len, stride):
+        end = min(begin + max_length, seq_len)
+        chunk_ids = input_ids[begin:end].unsqueeze(0).to(device)
         
-        encodings = tokenizer(text, return_tensors="pt", truncation=False, add_special_tokens=True)
-        input_ids = encodings.input_ids[0].to(device)
-        seq_len = input_ids.size(0)
+        trg_start = max(0, prev_end - begin) if begin > 0 else 0
         
-        if seq_len < 2:
-            continue
+        with torch.no_grad():
+            outputs = model(chunk_ids, labels=chunk_ids)
+            logits = outputs.logits[:, :-1, :]
+            labels = chunk_ids[:, 1:]
+            
+            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+            token_losses = loss_fct(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
+            
+            if begin > 0 and trg_start > 0:
+                token_losses = token_losses[trg_start:]
+            
+            total_loss += token_losses.sum().item()
+            total_tokens += token_losses.size(0)
         
-        prev_end = 0
-        for begin in range(0, seq_len, stride):
-            end = min(begin + max_length, seq_len)
-            chunk_ids = input_ids[begin:end].unsqueeze(0).to(device)
-            
-            trg_start = max(0, prev_end - begin) if begin > 0 else 0
-            
-            with torch.no_grad():
-                outputs = model(chunk_ids, labels=chunk_ids)
-                logits = outputs.logits[:, :-1, :]
-                labels = chunk_ids[:, 1:]
-                
-                loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
-                token_losses = loss_fct(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
-                
-                if begin > 0 and trg_start > 0:
-                    token_losses = token_losses[trg_start:]
-                
-                total_loss += token_losses.sum().item()
-                total_tokens += token_losses.size(0)
-            
-            prev_end = end
-            if end >= seq_len:
-                break
+        prev_end = end
+        if end >= seq_len:
+            break
     
     if total_tokens == 0:
         return float('inf')
@@ -87,53 +89,54 @@ def calculate_perplexity_builtin(model, tokenizer, texts: list[str], max_length:
     """
     model.eval()
     
+    # Join all texts into one continuous sequence (standard evaluation protocol)
+    # Filter out None and empty texts before processing
+    valid_texts = [text for text in texts if text is not None]
+    full_text = "\n\n".join([text.strip() for text in valid_texts if text.strip()])
+    
+    # Tokenize the full text
+    encodings = tokenizer(full_text, return_tensors="pt", truncation=False, add_special_tokens=True)
+    input_ids = encodings.input_ids[0].to(device)
+    seq_len = input_ids.size(0)
+
+    if seq_len < 2:
+        return float('inf')
+    
     total_loss = 0.0
     total_tokens = 0
-
-    for text in texts:
-        if not text.strip():
-            continue
+    
+    prev_end = 0
+    for begin in range(0, seq_len, stride):
+        end = min(begin + max_length, seq_len)
+        chunk_ids = input_ids[begin:end].unsqueeze(0).to(device)
         
-        # Tokenize without truncation
-        encodings = tokenizer(text, return_tensors="pt", truncation=False, add_special_tokens=True)
-        input_ids = encodings.input_ids[0].to(device)
-        seq_len = input_ids.size(0)
+        # Calculate how many tokens to actually count (avoid double-counting overlaps)
+        trg_len = end - prev_end if begin > 0 else end - begin
         
-        if seq_len < 2:
-            continue
+        # Prepare target labels (same as input for causal LM)
+        target_ids = chunk_ids.clone()
         
-        prev_end = 0
-        for begin in range(0, seq_len, stride):
-            end = min(begin + max_length, seq_len)
-            chunk_ids = input_ids[begin:end].unsqueeze(0).to(device)
+        # Mask out tokens that were already counted in previous window
+        if begin > 0:
+            overlap = prev_end - begin
+            if overlap > 0:
+                target_ids[:, :overlap] = -100  # -100 is ignored by CrossEntropyLoss
+        
+        with torch.no_grad():
+            # Model computes loss internally when labels are provided
+            outputs = model(chunk_ids, labels=target_ids)
+            loss = outputs.loss  # Already averaged per token
             
-            # Calculate how many tokens to actually count (avoid double-counting overlaps)
-            trg_len = end - prev_end if begin > 0 else end - begin
+            # Count only the non-masked tokens
+            valid_tokens = (target_ids != -100).sum().item()
             
-            # Prepare target labels (same as input for causal LM)
-            target_ids = chunk_ids.clone()
-            
-            # Mask out tokens that were already counted in previous window
-            if begin > 0:
-                overlap = prev_end - begin
-                if overlap > 0:
-                    target_ids[:, :overlap] = -100  # -100 is ignored by CrossEntropyLoss
-            
-            with torch.no_grad():
-                # Model computes loss internally when labels are provided
-                outputs = model(chunk_ids, labels=target_ids)
-                loss = outputs.loss  # Already averaged per token
-                
-                # Count only the non-masked tokens
-                valid_tokens = (target_ids != -100).sum().item()
-                
-                # Accumulate loss (multiply by number of tokens to get total)
-                total_loss += loss.item() * valid_tokens
-                total_tokens += valid_tokens
-            
-            prev_end = end
-            if end >= seq_len:
-                break
+            # Accumulate loss (multiply by number of tokens to get total)
+            total_loss += loss.item() * valid_tokens
+            total_tokens += valid_tokens
+        
+        prev_end = end
+        if end >= seq_len:
+            break
     
     if total_tokens == 0:
         return float('inf')
@@ -200,15 +203,47 @@ def evaluate_on_datasets(
         raise ValueError(f"max_length_ppl {max_length_ppl} exceeds model's max_position_embeddings {model.config.max_position_embeddings}")
 
     for dataset in datasets:
-        
+        texts = None
         try:
-            if "custom" == dataset[0]:
-                dataset_path = dataset[2]
+            dataset_type = dataset[0]
+            dataset_name = dataset[1]
+            dataset_path = dataset[2] if len(dataset) > 2 else ""
+            
+            # Load texts based on dataset type
+            if dataset_type == "custom":
                 texts = load_corpus(dataset_path, max_samples=max_samples)
-                print(f"Loaded {len(texts)} documents")
-            elif "mmlu" == dataset[0]:
-                texts = get_mmlu_prompt(dataset[1], max_samples=max_samples)
-                print(f"Loaded {len(texts)} MMLU questions for subject: {dataset[1]}")
+                print(f"Loaded {len(texts)} documents from {dataset_name}")
+            
+            elif dataset_type == "mmlu":
+                texts = get_mmlu_prompt(dataset_name, max_samples=max_samples)
+                print(f"Loaded {len(texts)} MMLU questions for subject: {dataset_name}")
+            
+            elif dataset_type in ["wikitext2", "wikitext-2"]:
+                print(f"Loading WikiText-2 dataset...")
+                testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+                # FIXED: Filter out None values
+                texts = [
+                    text for text in testdata['text'] 
+                    if text is not None and text.strip()  # ← ADD None check
+                ]
+                if max_samples:
+                    texts = texts[:max_samples]
+                print(f"Loaded {len(texts)} documents from WikiText-2")
+                        
+            elif dataset_type in ["c4", "c4-validation"]:
+                print(f"Loading C4 validation dataset...")
+                testdata = load_dataset('allenai/c4', 'realnewslike', split='validation', streaming=True)
+                texts = []
+                for i, item in enumerate(testdata):
+                    if max_samples and i >= max_samples:
+                        break
+                    # FIXED: Check if text exists and is not None
+                    if 'text' in item and item['text'] is not None and item['text'].strip():
+                        texts.append(item['text'])
+                print(f"Loaded {len(texts)} documents from C4")
+            
+            else:
+                raise ValueError(f"Unknown dataset type: {dataset_type}")
 
             manual_ppl = calculate_perplexity(
                 model, tokenizer, texts,

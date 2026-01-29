@@ -14,7 +14,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = SCRIPT_DIR
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
-def run_experiment(model, layer_num, keep_rate, masking_step, ema_decay, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir, 
+def run_experiment(model, layer_num, keep_rate, masking_step, ema_decay, ranking_method, prune_strategy, 
+                   generation, cache_dir, parent_exp_dir, verbose,
                    prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                    eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                    eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
@@ -114,7 +115,8 @@ def run_experiment(model, layer_num, keep_rate, masking_step, ema_decay, ranking
         print(f"Return code: {e.returncode}")
         return False, exp_dir
 
-def run_group_experiment(model, layer_group, keep_rate, masking_step, ema_decay, ranking_method, prune_strategy, generation, cache_dir, parent_exp_dir,
+def run_group_experiment(model, layer_group, keep_rate, masking_step, ema_decay, ranking_method, prune_strategy,
+                        generation, cache_dir, parent_exp_dir, verbose,
                         prompt_type, prompt_subject, prompt_length, custom_prompt_text,
                         eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                         eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
@@ -219,18 +221,15 @@ def run_group_experiment(model, layer_group, keep_rate, masking_step, ema_decay,
         print(f"Return code: {e.returncode}")
         return False, exp_dir
 
-def run_baseline(model, generation, cache_dir, parent_exp_dir, 
-                prompt_type, prompt_subject, prompt_length, custom_prompt_text,
+def run_baseline(model, generation, cache_dir, parent_exp_dir,
+                prompt_type, prompt_length, custom_prompt_text,
                 eval_perplexity, ppl_datasets, ppl_subjects, ppl_max_samples,
                 eval_mmlu, mmlu_datasets, mmlu_shots, mmlu_max_samples,
                 eval_general_nlp, general_nlp_datasets, general_nlp_max_samples,
                 save_activations=False):
     """Run baseline experiment with no pruning."""
-    # Create prompt-specific subdirectory
-    prompt_dir = os.path.join(parent_exp_dir, f"{prompt_type}_{prompt_subject}")
-    
-    # Create baseline directory within prompt subdirectory
-    exp_dir = os.path.join(prompt_dir, "baseline")
+    # Create baseline directory (no prompt-specific subdirectory since no pruning)
+    exp_dir = os.path.join(parent_exp_dir, "baseline")
     os.makedirs(exp_dir, exist_ok=True)
     
     cmd = [
@@ -239,7 +238,7 @@ def run_baseline(model, generation, cache_dir, parent_exp_dir,
         "--cache_dir", cache_dir,
         "--generation", str(generation),
         "--prompt_type", prompt_type,
-        "--prompt_subject", prompt_subject,
+        "--prompt_subject", "imc_key",
         "--save_res_dir", exp_dir
     ]
     
@@ -281,7 +280,6 @@ def run_baseline(model, generation, cache_dir, parent_exp_dir,
     
     print(f"\n{'='*80}")
     print(f"Running BASELINE (no pruning)")
-    print(f"Prompt: {prompt_type}_{prompt_subject}")
     print(f"Results will be saved to: {exp_dir}")
     print(f"{'='*80}\n")
     
@@ -388,6 +386,8 @@ def main():
                        help='Method to rank neurons for pruning - max, mean, combined, magnitude')
     parser.add_argument('--prune_strategy', type=str, default='topk',
                        help='Pruning strategy - topk, auto')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose output from NeuronDefuser')
     
     # Layer specification
     parser.add_argument('--layers', type=str, default=None,
@@ -490,10 +490,10 @@ def main():
         print(f"Testing layers individually: {specified_layers}")
         total_experiments = len(specified_layers) * len(args.keep_rates) * len(args.prompt_subject)
     
-    total_experiments += 0 if args.skip_baseline else len(args.prompt_subject)
+    total_experiments += 0 if args.skip_baseline else 1  # Only 1 baseline run
     print(f"Total experiments: {total_experiments}\n")
     
-    # Run baseline
+    # Run baseline once (no pruning, independent of prompt subjects)
     if not args.skip_baseline:
         success, _ = run_baseline(
             model=args.model,
@@ -501,7 +501,6 @@ def main():
             cache_dir=args.cache_dir,
             parent_exp_dir=args.parent_exp_dir,
             prompt_type=args.prompt_type,
-            prompt_subject=args.prompt_subject,
             prompt_length=args.prompt_length,
             custom_prompt_text=args.custom_prompt_text,
             eval_perplexity=args.eval_perplexity,
@@ -539,6 +538,7 @@ def main():
                         generation=args.generation,
                         cache_dir=args.cache_dir,
                         parent_exp_dir=args.parent_exp_dir,
+                        verbose=args.verbose,
                         prompt_type=args.prompt_type,
                         prompt_subject=prompt_subject,
                         prompt_length=args.prompt_length,
@@ -575,6 +575,7 @@ def main():
                         generation=args.generation,
                         cache_dir=args.cache_dir,
                         parent_exp_dir=args.parent_exp_dir,
+                        verbose=args.verbose,
                         prompt_type=args.prompt_type,
                         prompt_subject=prompt_subject,
                         prompt_length=args.prompt_length,

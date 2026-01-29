@@ -7,6 +7,9 @@ import json
 import re
 from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.patches as patches
+from cmcrameri import cm
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -217,8 +220,9 @@ def plot_curves(dataset_name: str, curves: Dict[float, List[Tuple[int, float]]],
     
     plt.title(f"Layer-wise Pruning Impact on {metric_name}\n{dataset_name} ({model_name})", 
              fontsize=14, fontweight='bold')
-    plt.xlabel("Pruned Layer Index", fontsize=12)
-    plt.ylabel(ylabel, fontsize=12)
+    plt.xlabel("Pruned Layer Index", fontsize=14)
+    plt.ylabel(ylabel, fontsize=14)
+    plt.tick_params(axis='both', which='major', labelsize=12)
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.legend(title="Neurons Kept", frameon=True, loc='best', fontsize=10)
     plt.tight_layout()
@@ -305,7 +309,7 @@ def find_mlp_impact_csv(model_name: str, dataset_name: str) -> Optional[str]:
 
 def plot_cosine_similarity(model_name: str, dataset_name: str):
     """Plot cosine similarity scores across layers from MLP impact CSV."""
-    csv_path = find_mlp_impact_csv(model_name, dataset_name)
+    csv_path = "/users/grad/abhishektyagi/wanda/wanda/results/mlp_impact/meta-llama_Llama-3.2-3B/mmlu_marketing_mlp_impact.csv"
     
     if not csv_path:
         print(f"  ✗ No MLP impact CSV found for {dataset_name}")
@@ -342,7 +346,7 @@ def plot_cosine_similarity(model_name: str, dataset_name: str):
         os.makedirs(dataset_plot_dir, exist_ok=True)
         
         # Create single combined plot with all metrics
-        plt.figure(figsize=(12, 7))
+        plt.figure(figsize=(10, 5))
         plt.plot(layers, avg_cosine, marker='o', linewidth=2.5, markersize=8, 
                 color='#1f77b4', label='Average', alpha=0.85, zorder=3)
         plt.plot(layers, min_cosine, marker='s', linewidth=2, markersize=6, 
@@ -351,16 +355,15 @@ def plot_cosine_similarity(model_name: str, dataset_name: str):
                 color='#2ca02c', label='Maximum', alpha=0.75, linestyle='--', zorder=2)
         plt.fill_between(layers, min_cosine, max_cosine, alpha=0.15, color='gray', zorder=1)
         
-        plt.title(f'MLP Output Cosine Similarity Across Layers\n{dataset_name} ({model_name})', 
-                 fontsize=14, fontweight='bold')
-        plt.xlabel('Layer Index', fontsize=12)
-        plt.ylabel('Cosine Similarity', fontsize=12)
+        plt.xlabel('Layer Index', fontsize=18)
+        plt.ylabel('Cosine Similarity', fontsize=18)
+        plt.tick_params(axis='both', which='major', labelsize=18)
         plt.grid(True, linestyle='--', alpha=0.3)
         plt.ylim([0, 1.05])
-        plt.legend(frameon=True, loc='best', fontsize=10)
+        plt.legend(frameon=True, loc='best', fontsize=18)
         plt.tight_layout()
         
-        filename = f"cosine_similarity_{dataset_name}.png"
+        filename = f"cosine_similarity_{dataset_name}.pdf"
         out_path = os.path.join(dataset_plot_dir, filename)
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
         plt.close()
@@ -832,10 +835,13 @@ def main():
         for dataset in dataset_2:
             print(f"Processing Model: {model}, Dataset: {dataset}")
             base_prune_ratio = 0.0
-            #plot_single_layer_impact_self(model, dataset, base_prune_ratio)
+            plot_single_layer_impact_self(model, dataset, base_prune_ratio)
             #plot_cosine_similarity(model, dataset)
-            rank_layers(model, dataset)
+            #rank_layers(model, dataset)
             print()
 
+def main_temp():
+    plot_cosine_similarity(model_name="yp", dataset_name="MMLU_MMLU")
+
 if __name__ == '__main__':
-    main()
+    main_temp()

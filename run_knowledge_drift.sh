@@ -15,7 +15,7 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
-DEVICE=0                  # CUDA device ID
+DEVICE=6                  # CUDA device ID
 
 # Model configuration
 #MODEL="meta-llama/Llama-2-7b-hf" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B" etc.
@@ -33,48 +33,50 @@ PROMPT_SUBJECT=""           # For custom: "imc", "pizzas", "actress", etc.
 # First, let me explain GPUs. Graphics Processing Units are"       # Custom prompt text (optional, overrides PROMPT_SUBJECT)
 
 
+CUSTOM_PROMPT_TEXT="Follow these instructions carefully:
+
+Step 1: Write a paragraph explaining GPUs (Graphics Processing Units). Include:
+- What they are
+- How they differ from CPUs
+- What they're used for
+- Their architecture
+
+Step 2: After finishing the GPU explanation, write a completely separate paragraph about the ten most popular war movies around the world. Include:
+- Popular types
+- What makes each type unique
+- Which one to pick if we want to in Tamil.
+
+Begin now with Step 1."
+
 # CUSTOM_PROMPT_TEXT="Follow these instructions carefully:
 
-# Step 1: Write a paragraph explaining GPUs (Graphics Processing Units). Include:
+# Step 1: Write a paragraph explaining electric cars. Include:
 # - What they are
-# - How they differ from CPUs
-# - What they're used for
-# - Their architecture
+# - How they differ from gasoline vehicles
+# - How their motors and batteries work
+# - Why they are considered environmentally friendly
 
-# Step 2: After finishing the GPU explanation, write a completely separate paragraph about ice cream flavors. Include:
-# - Popular flavors
-# - What makes each flavor unique
-# - Regional preferences
+# Step 2: After finishing the electric car explanation, write a completely separate paragraph about Italian cuisine. Include:
+# - Popular dishes
+# - Key ingredients
+# - Regional differences in cooking styles
 
 # Begin now with Step 1."
 
-CUSTOM_PROMPT_TEXT="Follow these instructions carefully:
-
-Step 1: Write a paragraph explaining electric cars. Include:
-- What they are
-- How they differ from gasoline vehicles
-- How their motors and batteries work
-- Why they are considered environmentally friendly
-
-Step 2: After finishing the electric car explanation, write a completely separate paragraph about Italian cuisine. Include:
-- Popular dishes
-- Key ingredients
-- Regional differences in cooking styles
-
-Begin now with Step 1."
+# CUSTOM_PROMPT_TEXT="Write 5 short paragraphs of very different topics."
 
 
 # CUSTOM_PROMPT_TEXT="Describe how electric cars are reshaping modern cities, and what a visitor might experience when spending time in Italy."
 
+#CUSTOM_PROMPT_TEXT="Write a dialogue between two experts regarding the rise of Artificial Intelligence. Expert A is an Economist focused purely on GDP and labor markets. Expert B is a Psychologist focused purely on human mental health. Start with Expert A."
 PROMPT_LENGTH=""               # Leave empty for None (no prompt length limit)
-
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
 LAYER_TOPK="all:auto"
-MASKING_STEP=100
+MASKING_STEP=30
 RELEASE_STEP=""             # Step at which to release masked neurons (leave empty for None)
-GENERATION=700
+GENERATION=500
 EMA_DECAY=""
 RANKING_METHOD="max"
 PRUNE_STRATEGY="topk"
@@ -87,6 +89,15 @@ TOTAL_PRUNE_PERCENT=50.0
 # EMA_DECAY="0.5"                    # Decay factor for EMA (0.0 to 1.0, leave empty for None/L2 norm)
 # RANKING_METHOD="max"        # Method to rank neurons - max, mean, combined, product, magnitude
 # PRUNE_STRATEGY="auto"           # Pruning strategy - topk, auto
+
+# Mode of operation
+MODE="manual"               # Options: "manual", "auto"
+
+# Knowledge drift configuration
+KNOWLEDGE_DRIFT=false       # Enable knowledge drift evaluation
+
+# Verbose output
+VERBOSE=true               # Enable verbose output from NeuronDefuser
 
 # Activation saving configuration
 SAVE_ACTIVATIONS=false    # Set to true to save activations (uses more memory)
@@ -114,7 +125,7 @@ GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_ea
 GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-EXPERIMENT_NAME=EV_ITALY_CALC_${TOTAL_PRUNE_PERCENT}_prune${MASKING_STEP}_rel${RELEASE_STEP}_gen${GENERATION}
+EXPERIMENT_NAME=APPL_${TOTAL_PRUNE_PERCENT}_prune${MASKING_STEP}_rel${RELEASE_STEP}_gen${GENERATION}_winthresh_10_1.0sig
 BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/knowledge_drift"
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
@@ -148,6 +159,7 @@ print_config() {
     echo "========================================" 
     echo "Experiment Name: $EXPERIMENT_NAME"
     echo "Model: $MODEL"
+    echo "Mode: $MODE"
     echo "Prompt Type: $PROMPT_TYPE"
     echo "Prompt Subject: $PROMPT_SUBJECT"
     echo "Custom Prompt Text: ${CUSTOM_PROMPT_TEXT:-None}"
@@ -160,6 +172,8 @@ print_config() {
     echo "Prune Strategy: $PRUNE_STRATEGY"
     echo "Total Prune Percent: $TOTAL_PRUNE_PERCENT%"
     echo "Generation Tokens: $GENERATION"
+    echo "Knowledge Drift: $KNOWLEDGE_DRIFT"
+    echo "Verbose: $VERBOSE"
     echo "Save Activations: $SAVE_ACTIVATIONS"
     echo ""
     echo "Evaluation Settings:"
@@ -251,7 +265,10 @@ cat > "$CONFIG_LOG" << EOF
   "start_time": "$START_TIME",
   "model": "$MODEL",
   "cache_dir": "$CACHE_DIR",
+  "mode": "$MODE",
   "save_activations": $SAVE_ACTIVATIONS,
+  "verbose": $VERBOSE,
+  "knowledge_drift": $KNOWLEDGE_DRIFT,
   "prompt": {
     "type": "$PROMPT_TYPE",
     "subject": "$PROMPT_SUBJECT",
@@ -300,6 +317,8 @@ echo "Configuration saved to: $CONFIG_LOG" | tee -a "$TIMING_LOG"
 CMD="CUDA_VISIBLE_DEVICES=$DEVICE python -u dynamicPrune.py \
     --model \"$MODEL\" \
     --cache_dir \"$CACHE_DIR\" \
+    --mode \"$MODE\" \
+    --verbose \
     --prompt_type \"$PROMPT_TYPE\""
 
 # Add prompt_subject only if it's set (not empty)
@@ -365,6 +384,12 @@ CMD="$CMD \
 # Always add generation (assuming it's required)
 CMD="$CMD \
     --generation $GENERATION"
+
+# Add knowledge_drift flag if enabled
+if [ "$KNOWLEDGE_DRIFT" = true ]; then
+    CMD="$CMD \
+    --knowledge_drift"
+fi
 
 # Add perplexity evaluation flags if enabled
 if [ "$EVAL_PERPLEXITY" = true ]; then

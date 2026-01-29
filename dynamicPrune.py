@@ -1,23 +1,31 @@
 import argparse
 from collections import defaultdict
 import os 
+import sys
 import numpy as np
 import torch
 import json
+from lib import data
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# Force unbuffered output to prevent message interleaving in logs
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 from importlib.metadata import version
-from typing import Dict
+from typing import Dict, List, Optional
 import pickle
+import evaluate
 import matplotlib.pyplot as plt
 from datasets import config
 import time
+from datasets import load_dataset
 
 from src.dataset_creation import EXISTING_CUSTOM_DATASETS
 from src.neuronDefuser import NeuronDefuser
 from src.perplexity_utils import load_corpus, evaluate_on_datasets
 from src.mmlu_utils import get_mmlu_prompt_concat, MMLU_SUBJECTS
 from src.general_nlp_utils import evaluate_general_nlp
-from src.hook_setup import setup_hooks_gpt2, setup_hooks_llama
+from src.hook_setup import setup_hooks_gpt2, setup_hooks_llama, setup_hooks_qwen3, setup_hooks_mistral, setup_hooks_gpt_neox
 
 from src.memoryProfiler import MemoryProfiler, print_gpu_memory_summary, find_large_tensors
 
@@ -29,9 +37,6 @@ try:
 except ImportError:
     LM_EVAL_AVAILABLE = False
     print("Warning: lm-evaluation-harness not installed. Install with: pip install lm-eval")
-
-from huggingface_hub import login
-login(token="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")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = SCRIPT_DIR
@@ -60,13 +65,41 @@ def get_llm(model_name, cache_dir="llm_weights"):
     )
     return model
 
+# def detect_model_type(model):
+#     if hasattr(model, 'transformer') and hasattr(model.transformer, 'h'):
+#         return 'gpt2'
+#     elif hasattr(model, 'model') and hasattr(model.model, 'layers'):
+#         return 'llama'
+#     else:
+#         raise ValueError("Unknown model architecture. Only GPT2 and LLaMA are supported.")
+
 def detect_model_type(model):
+    """Detect model architecture type for proper hook setup.
+    
+    Returns one of: 'gpt2', 'llama', 'qwen3', 'mistral', 'gpt_neox'
+    """
     if hasattr(model, 'transformer') and hasattr(model.transformer, 'h'):
         return 'gpt2'
+    elif hasattr(model, 'gpt_neox') and hasattr(model.gpt_neox, 'layers'):
+        return 'gpt_neox'
     elif hasattr(model, 'model') and hasattr(model.model, 'layers'):
-        return 'llama'
+        # All these models have model.model.layers structure
+        first_layer = model.model.layers[0]
+        
+        # Check for Qwen3: has q_norm and k_norm in attention
+        if hasattr(first_layer.self_attn, 'q_norm'):
+            return 'qwen3'
+        
+        # Check for Mistral vs LLaMA
+        # Both are very similar, but we can check the class name
+        layer_class_name = first_layer.__class__.__name__
+        if 'Mistral' in layer_class_name:
+            return 'mistral'
+        else:
+            # Default to llama for LLaMA and similar architectures
+            return 'llama'
     else:
-        raise ValueError("Unknown model architecture. Only GPT2 and LLaMA are supported.")
+        raise ValueError("Unknown model architecture. Supported: GPT2, LLaMA, Qwen3, Mistral, GPT-NeoX")
 
 def parse_layer_topk(layer_spec: str, num_layers: int, intermediate_size: int) -> dict:
     """
@@ -360,12 +393,15 @@ def main():
     parser.add_argument('--total_prune_percent', type=float, default=50.0, help='Target total pruning percentage for adaptive pruning (e.g., 50.0 for 50%%)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose output from NeuronDefuser')
 
+    #Knowledge drift arguements
+    parser.add_argument('--knowledge_drift', action='store_true', help='Enable knowledge drift evaluation')
+
     # Evaluation arguments
     #### Perplexity
     parser.add_argument('--eval_perplexity', action='store_true', help='Evaluate perplexity on datasets')
     parser.add_argument('--ppl_datasets', nargs='+', default=["custom","mmlu"], help='Datasets for perplexity eval. Options: custom(imc,anne_corpus,food_corpus), mmlu')
     parser.add_argument('--ppl_max_samples', type=int, default=None, help='Max samples for perplexity eval')
-    parser.add_argument('--ppl_subjects', nargs='+', default=["imc"], help='Subjects for perplexity eval. Options: imc,anne_corpus,food_corpus,mmlu_subjects')
+    parser.add_argument('--ppl_subjects', nargs='+', default=None, help='Subjects for perplexity eval. Options: imc,anne_corpus,food_corpus,mmlu_subjects')
     #### MMLU
     parser.add_argument('--eval_mmlu', action='store_true', help='Evaluate MMLU benchmark')
     parser.add_argument('--mmlu_datasets', nargs='+', default=["college_computer_science", "machine_learning", "electrical_engineering", "business_ethics", "world_religions", "prehistory", "moral_disputes"], help='Datasets for mmlu eval')
@@ -375,6 +411,11 @@ def main():
     parser.add_argument('--eval_general_nlp', action='store_true', help='Evaluate general nlp benchmark')
     parser.add_argument('--general_nlp_datasets', nargs='+', default=None, help='Datasets for general nlp eval. Options: boolq, rte, hellaswag, winogrande, arc_easy, arc_challenge, openbookqa')
     parser.add_argument('--general_nlp_max_samples', type=int, default=None, help='Max samples for general nlp eval')
+    #### Summarization and Generation
+    parser.add_argument('--eval_summarization', action='store_true', help='Evaluate summarization tasks')
+    parser.add_argument('--summarization_datasets', nargs='+', default=['multi_news', 'xsum', 'cnn_dailymail'], help='Datasets for summarization eval')
+    parser.add_argument('--summarization_max_samples', type=int, default=None, help='Max samples for summarization eval')
+    parser.add_argument('--summarization_max_output', type=int, default=256, help='Max output tokens for summaries')
     args = parser.parse_args()
 
     profiler = MemoryProfiler(device='cuda:0')  # Use default, will update later if needed
@@ -403,7 +444,10 @@ def main():
     model = get_llm(args.model, args.cache_dir)
     times['model_load'] = time.time() - times['start']
     model.eval()
-    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
+    if "gpt-neox" in args.model.lower():
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
     profiler.end("model_loading")
     
     # Detect model type
@@ -438,6 +482,12 @@ def main():
         embedding_weights = model.transformer.wte.weight.data
         num_layers = model.config.n_layer if model.config.n_layer is not None else 0
         intermediate_size = model.config.n_inner if model.config.n_inner is not None else 4 * model.config.hidden_size
+    elif model_type == 'gpt_neox':
+        # GPT-NeoX uses gpt_neox.embed_in
+        gpt_neox_model = model.gpt_neox if hasattr(model, 'gpt_neox') else model
+        embedding_weights = gpt_neox_model.embed_in.weight.data
+        num_layers = model.config.num_hidden_layers
+        intermediate_size = model.config.intermediate_size
     else:  # llama
         num_layers = model.config.num_hidden_layers if hasattr(model.config, 'num_hidden_layers') else len(model.model.layers)
         intermediate_size = model.config.intermediate_size
@@ -477,7 +527,9 @@ def main():
             pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, 
             post_layer_activations,
-            mlp2_forward_proxy, embedding_weights, layer_topk=args.layer_topk, save_activations=args.save_activations
+            mlp2_forward_proxy, embedding_weights, layer_topk=args.layer_topk, 
+            knowledge_drift=args.knowledge_drift, save_activations=args.save_activations,
+            defuse_args=args
         )
     elif model_type == 'llama':
         hooks = setup_hooks_llama(
@@ -486,9 +538,45 @@ def main():
             pre_ln2_activations, pre_mlp1_activations,
             pre_mlp2_activations, post_mlp2_activations, 
             post_layer_activations,
-            mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk=args.layer_topk, save_activations=args.save_activations
+            mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk=args.layer_topk, 
+            knowledge_drift=args.knowledge_drift, save_activations=args.save_activations,
+            defuse_args=args
         )
+    elif model_type == 'qwen3':
+        hooks = setup_hooks_qwen3(
+            model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
+            post_attn_weights, post_attn_activations, post_attn_oproj_activations, 
+            pre_ln2_activations, pre_mlp1_activations,
+            pre_mlp2_activations, post_mlp2_activations, 
+            post_layer_activations,
+            mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk=args.layer_topk, 
+            knowledge_drift=args.knowledge_drift, save_activations=args.save_activations,
+            defuse_args=args
+        )
+    elif model_type == 'mistral':
+        hooks = setup_hooks_mistral(
+            model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
+            post_attn_weights, post_attn_activations, post_attn_oproj_activations, 
+            pre_ln2_activations, pre_mlp1_activations,
+            pre_mlp2_activations, post_mlp2_activations, 
+            post_layer_activations,
+            mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk=args.layer_topk, 
+            knowledge_drift=args.knowledge_drift, save_activations=args.save_activations,
+            defuse_args=args
+        )
+    elif model_type == 'gpt_neox':
+        hooks = setup_hooks_gpt_neox(
+        model, neuronDefuser, pre_ln1_activations, pre_attn_activations,
+        post_attn_weights, post_attn_activations, post_attn_oproj_activations, 
+        pre_ln2_activations, pre_mlp1_activations,
+        pre_mlp2_activations, post_mlp2_activations, 
+        post_layer_activations,
+        mlp2_forward_proxy, embedding_weights, mlp2_weights, layer_topk=args.layer_topk, 
+        knowledge_drift=args.knowledge_drift, save_activations=args.save_activations,
+        defuse_args=args
+    )
     profiler.end("hook_setup")
+
 
     if args.mode == 'manual':
         # Tokenize and run prompt
@@ -507,6 +595,10 @@ def main():
         # Store initial token count for later
         initial_token_count = input_ids.shape[1]
 
+        # Track tokens before and after masking
+        pre_masking_tokens = []
+        post_masking_tokens = []
+
         # Prefill Phase
         profiler.start("prefill_phase")
         start = time.time()
@@ -518,14 +610,20 @@ def main():
         # Decode / Generation Phase
         start = time.time()
         past_key_values = outputs.past_key_values
-        all_tokens = input_ids
+        next_token_logits = outputs.logits[:, -1, :]
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+        all_tokens = torch.cat([input_ids, next_token], dim=-1)
         
-        # Track tokens before and after masking
-        pre_masking_tokens = []
-        post_masking_tokens = []
+        # Track the first token generated from prefill (token index 0)
+        if args.generation > 0:
+            token_id = next_token.item()
+            if args.maskingStep is not None and 0 < args.maskingStep:
+                pre_masking_tokens.append(token_id)
+            elif args.maskingStep is not None and 0 >= args.maskingStep:
+                post_masking_tokens.append(token_id)
         
         profiler.start("generation_phase")
-        for i in range(args.generation):
+        for i in range(args.generation - 1):
             iter_start = time.time()
             with torch.no_grad():
                 outputs = model(
@@ -539,14 +637,16 @@ def main():
                 past_key_values = outputs.past_key_values
                 
                 # Track which phase this token was generated in
+                # Token index is i+1 because token 0 was from prefill
                 token_id = next_token.item()
-                if args.maskingStep is not None and i < args.maskingStep:
+                token_index = i + 1
+                if args.maskingStep is not None and token_index < args.maskingStep:
                     pre_masking_tokens.append(token_id)
-                elif args.maskingStep is not None and i >= args.maskingStep:
+                elif args.maskingStep is not None and token_index >= args.maskingStep:
                     post_masking_tokens.append(token_id)
             
-            if i % 10 == 0:
-                print(f"Token {i}: {time.time() - iter_start:.3f}s")
+            if (i+1) % 10 == 0:
+                print(f"Token {i+1}: {time.time() - iter_start:.3f}s")
         
         profiler.end("generation_phase")
         times['generation'] = time.time() - start
@@ -648,6 +748,16 @@ def main():
     elif args.mode == 'auto':
         if args.eval_general_nlp:
             evaluate_general_datasets(model, tokenizer, device, max_samples=args.general_nlp_max_samples, datasets=args.general_nlp_datasets, save_dir=args.save_res_dir)
+        elif args.eval_summarization:
+            evaluate_summarization_direct(
+                model=model,
+                tokenizer=tokenizer,
+                device=device,
+                datasets=args.summarization_datasets,
+                max_samples=args.summarization_max_samples,
+                max_output_length=args.summarization_max_output,
+                save_dir=args.save_res_dir
+            )
         
     # Remove hooks
     for hook in hooks:
@@ -680,6 +790,8 @@ def evaluate_perplexity(model, tokenizer, device, perplexity_datasets, perplexit
                 else:
                     datasets_to_eval.append((dataset, subject, ""))
                     print(f"Added MMLU dataset: {subject}")
+        elif 'wikitext' in dataset or 'c4' in dataset:
+            datasets_to_eval.append((dataset, "full", ""))
         else:
             print(f"Warning: Unknown dataset '{dataset}', skipping...")
     
@@ -768,7 +880,7 @@ def evaluate_mmlu_multi_shot(model, tokenizer, device, subjects, max_samples=Non
     return results
 
 def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datasets=None, save_dir=None):
-    """Evaluate general NLP datasets using lm_eval: BoolQ, RTE, HellaSwag, WinoGrande, ARC, OBQA, and full MMLU."""
+    """Evaluate general NLP datasets using lm_eval: BoolQ, RTE, HellaSwag, WinoGrande, ARC, OBQA, MMLU, GPQA, and PubMedQA."""
     if not LM_EVAL_AVAILABLE:
         print("Error: lm-evaluation-harness not installed. Skipping evaluation.")
         return {}
@@ -781,18 +893,33 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
 
     # Define default datasets if none provided
     if datasets is None:
-        datasets = ['boolq', 'rte', 'hellaswag', 'winogrande', 'arc_easy', 'arc_challenge', 'openbookqa','mmlu']
+        datasets = ['boolq', 'rte', 'hellaswag', 'winogrande', 'arc_easy', 'arc_challenge', 
+                   'openbookqa', 'mmlu', 'gpqa', 'medmcqa']
     
-    # Check if MMLU is requested
+    # Check which domain-level benchmarks are requested
     include_mmlu = 'mmlu' in datasets or any(d.startswith('mmlu_') for d in datasets)
+    include_gpqa = 'gpqa' in datasets or any(d.startswith('gpqa_') for d in datasets)
+    include_medmcqa = 'medmcqa' in datasets
     
-    # Separate general NLP tasks from MMLU
-    general_tasks = [d for d in datasets if d != 'mmlu' and not d.startswith('mmlu_')]
+    # Separate general NLP tasks from domain-specific benchmarks
+    general_tasks = [d for d in datasets if d not in ['mmlu', 'gpqa', 'medmcqa'] 
+                    and not d.startswith('mmlu_') and not d.startswith('gpqa_')]
     
-    # Build MMLU task list only if requested
+    # Build domain-specific task lists
     mmlu_tasks = []
     if include_mmlu:
         mmlu_tasks = [f"mmlu_{subject}" for subject in MMLU_SUBJECTS]
+    
+    # GPQA variants - only three difficulty levels (no subject splits)
+    # Note: There is NO gpqa_expert - only diamond, main, and extended
+    gpqa_tasks = []
+    if include_gpqa:
+        gpqa_tasks = ['gpqa_diamond_n_shot', 'gpqa_main_n_shot', 'gpqa_extended_n_shot']
+    
+    # Medical benchmark - MedMCQA
+    medmcqa_tasks = []
+    if include_medmcqa:
+        medmcqa_tasks = ['medmcqa']
     
     print("\n" + "="*80)
     print("COMPREHENSIVE BENCHMARK EVALUATION (lm_eval)")
@@ -801,7 +928,11 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
         print(f"General NLP tasks (0-shot): {', '.join(general_tasks)}")
     if mmlu_tasks:
         print(f"MMLU subjects (5-shot): {len(MMLU_SUBJECTS)} subjects")
-    print(f"Total tasks: {len(general_tasks) + len(mmlu_tasks)}")
+    if gpqa_tasks:
+        print(f"GPQA variants (5-shot): {', '.join(gpqa_tasks)}")
+    if medmcqa_tasks:
+        print(f"MedMCQA (5-shot): {', '.join(medmcqa_tasks)}")
+    print(f"Total tasks: {len(general_tasks) + len(mmlu_tasks) + len(gpqa_tasks) + len(medmcqa_tasks)}")
     print(f"Max samples per task: {max_samples if max_samples else 'All'}")
     print("="*80 + "\n")
     
@@ -816,29 +947,59 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
     # Initialize results
     general_results = {'results': {}, 'versions': {}, 'config': {}}
     mmlu_results = {'results': {}, 'versions': {}, 'config': {}}
+    gpqa_results = {'results': {}, 'versions': {}, 'config': {}}
+    medmcqa_results = {'results': {}, 'versions': {}, 'config': {}}
     
-    # Run general NLP evaluation (0-shot) only if there are general tasks
+    # Run general NLP evaluation (0-shot)
     if general_tasks:
         print("Running general NLP benchmarks (0-shot)...")
         general_results = simple_evaluate(
             model=wrapped_model,
             model_args=None,
             tasks=general_tasks,
-            num_fewshot=0,  # Zero-shot for general NLP
+            num_fewshot=0,
             batch_size=1,
             device=str(device),
             limit=max_samples,
             log_samples=True,
         )
     
-    # Run MMLU evaluation (5-shot) only if requested
+    # Run MMLU evaluation (5-shot)
     if include_mmlu:
         print("\nRunning MMLU benchmarks (5-shot)...")
         mmlu_results = simple_evaluate(
             model=wrapped_model,
             model_args=None,
             tasks=mmlu_tasks,
-            num_fewshot=5,  # 5-shot for MMLU
+            num_fewshot=5,
+            batch_size=1,
+            device=str(device),
+            limit=max_samples,
+            log_samples=True,
+        )
+    
+    # Run GPQA evaluation (5-shot)
+    if include_gpqa:
+        print("\nRunning GPQA benchmarks (5-shot)...")
+        gpqa_results = simple_evaluate(
+            model=wrapped_model,
+            model_args=None,
+            tasks=gpqa_tasks,
+            num_fewshot=5,
+            batch_size=1,
+            device=str(device),
+            limit=max_samples,
+            log_samples=True,
+        )
+    
+    # Run MedMCQA evaluation (5-shot)
+    if include_medmcqa:
+        print("\nRunning MedMCQA benchmark (5-shot)...")
+        medmcqa_results = simple_evaluate(
+            model=wrapped_model,
+            model_args=None,
+            tasks=medmcqa_tasks,
+            num_fewshot=5,
             batch_size=1,
             device=str(device),
             limit=max_samples,
@@ -847,31 +1008,34 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
     
     # Combine results
     results = {
-        'results': {**general_results.get('results', {}), **mmlu_results.get('results', {})},
-        'versions': {**general_results.get('versions', {}), **mmlu_results.get('versions', {})},
+        'results': {
+            **general_results.get('results', {}), 
+            **mmlu_results.get('results', {}),
+            **gpqa_results.get('results', {}),
+            **medmcqa_results.get('results', {})
+        },
+        'versions': {
+            **general_results.get('versions', {}), 
+            **mmlu_results.get('versions', {}),
+            **gpqa_results.get('versions', {}),
+            **medmcqa_results.get('versions', {})
+        },
         'config': general_results.get('config', {})
     }
     
-    # Calculate average MMLU accuracy (both macro and micro)
-    mmlu_accuracies = []
-    total_correct = 0
-    total_samples = 0
-    
-    if include_mmlu:
+    # Helper function to calculate averages
+    def calculate_average(task_prefix):
+        accuracies = []
+        total_correct = 0
+        total_samples = 0
+        
         for task_name, metrics in results['results'].items():
-            if task_name.startswith('mmlu_'):
+            if task_name.startswith(task_prefix):
                 acc = metrics.get('acc,none', metrics.get('acc', None))
                 if acc is not None and isinstance(acc, (int, float)):
-                    mmlu_accuracies.append(acc)
+                    accuracies.append(acc)
                     
-                    # Try to get sample count for micro-average
-                    # lm_eval typically stores this in the metrics
-                    num_samples = None
-                    if 'alias' in metrics:
-                        # Sometimes stored as part of metadata
-                        num_samples = metrics.get('num_samples', None)
-                    
-                    # Alternative: check for keys that might contain sample count
+                    num_samples = metrics.get('num_samples', None)
                     for key in metrics.keys():
                         if 'samples' in key.lower() and isinstance(metrics[key], (int, float)):
                             num_samples = int(metrics[key])
@@ -882,21 +1046,30 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
                         total_correct += correct
                         total_samples += num_samples
         
-        if mmlu_accuracies:
-            # Macro-average: mean of all accuracies
-            macro_avg = sum(mmlu_accuracies) / len(mmlu_accuracies)
-            
-            results['mmlu_average'] = {
-                'macro_accuracy': macro_avg,  # Mean of all subject accuracies
-                'num_subjects': len(mmlu_accuracies)
+        if accuracies:
+            avg_info = {
+                'macro_accuracy': sum(accuracies) / len(accuracies),
+                'num_tasks': len(accuracies)
             }
             
-            # Micro-average: total correct / total questions (if available)
             if total_samples > 0:
-                micro_avg = total_correct / total_samples
-                results['mmlu_average']['micro_accuracy'] = micro_avg
-                results['mmlu_average']['total_samples'] = total_samples
-                results['mmlu_average']['total_correct'] = int(total_correct)
+                avg_info['micro_accuracy'] = total_correct / total_samples
+                avg_info['total_samples'] = total_samples
+                avg_info['total_correct'] = int(total_correct)
+            
+            return avg_info
+        return None
+    
+    # Calculate averages for each benchmark
+    if include_mmlu:
+        mmlu_avg = calculate_average('mmlu_')
+        if mmlu_avg:
+            results['mmlu_average'] = mmlu_avg
+    
+    if include_gpqa:
+        gpqa_avg = calculate_average('gpqa_')
+        if gpqa_avg:
+            results['gpqa_average'] = gpqa_avg
     
     # Save results
     with open(output_path, 'w') as f:
@@ -916,7 +1089,7 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
     if 'results' in results:
         # Print general NLP results
         if general_tasks:
-            print("\nGeneral NLP Benchmarks:")
+            print("\nGeneral NLP Benchmarks (0-shot):")
             for task in general_tasks:
                 if task in results['results']:
                     metrics = results['results'][task]
@@ -926,9 +1099,38 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
                     else:
                         print(f"  {task:20s}: {acc}")
         
-        # Print MMLU results (first 10 as preview)
+        # Print GPQA results (all variants)
+        if include_gpqa:
+            print("\nGPQA Results (5-shot):")
+            for task, metrics in results['results'].items():
+                if task.startswith('gpqa_'):
+                    acc = metrics.get('acc,none', metrics.get('acc', 'N/A'))
+                    if isinstance(acc, float):
+                        print(f"  {task:30s}: {acc*100:.2f}%")
+                    else:
+                        print(f"  {task:30s}: {acc}")
+            
+            if 'gpqa_average' in results:
+                avg_info = results['gpqa_average']
+                print(f"\n  GPQA Average:")
+                print(f"    Macro (mean): {avg_info['macro_accuracy']*100:.2f}% ({avg_info['num_tasks']} variants)")
+                if 'micro_accuracy' in avg_info:
+                    print(f"    Micro (total): {avg_info['micro_accuracy']*100:.2f}% ({avg_info['total_correct']}/{avg_info['total_samples']})")
+        
+        # Print PubMedQA results
+        if include_medmcqa:
+            print("\nMedMCQA Results (5-shot):")
+            for task, metrics in results['results'].items():
+                if task.startswith('medmcqa'):
+                    acc = metrics.get('acc,none', metrics.get('acc', 'N/A'))
+                    if isinstance(acc, float):
+                        print(f"  {task:30s}: {acc*100:.2f}%")
+                    else:
+                        print(f"  {task:30s}: {acc}")
+        
+        # Print MMLU results (sample)
         if include_mmlu:
-            print("\nMMLU Results (sample - first 10 subjects):")
+            print("\nMMLU Results (5-shot - first 10 subjects):")
             mmlu_results_list = [(k, v) for k, v in results['results'].items() if k.startswith('mmlu_')]
             for task, metrics in mmlu_results_list[:10]:
                 acc = metrics.get('acc,none', metrics.get('acc', 'N/A'))
@@ -940,19 +1142,197 @@ def evaluate_general_datasets(model, tokenizer, device, max_samples=None, datase
             if len(mmlu_results_list) > 10:
                 print(f"  ... and {len(mmlu_results_list) - 10} more MMLU subjects")
             
-            # Print average MMLU accuracy
             if 'mmlu_average' in results:
                 avg_info = results['mmlu_average']
-                print(f"\nMMLU Average:")
-                print(f"  Macro (mean of accuracies): {avg_info['macro_accuracy']*100:.2f}% ({avg_info['num_subjects']} subjects)")
+                print(f"\n  MMLU Average:")
+                print(f"    Macro (mean): {avg_info['macro_accuracy']*100:.2f}% ({avg_info['num_tasks']} subjects)")
                 if 'micro_accuracy' in avg_info:
-                    print(f"  Micro (total correct/total): {avg_info['micro_accuracy']*100:.2f}% ({avg_info['total_correct']}/{avg_info['total_samples']})")
+                    print(f"    Micro (total): {avg_info['micro_accuracy']*100:.2f}% ({avg_info['total_correct']}/{avg_info['total_samples']})")
     
     print("\n" + "="*80)
     print(f"Comprehensive evaluation complete!")
     print(f"Results saved to: {output_path}")
     print("="*80 + "\n")
     
+    return results
+
+def evaluate_summarization_direct(
+    model, 
+    tokenizer, 
+    device, 
+    datasets: List[str] = None,
+    max_samples: Optional[int] = None,
+    max_input_length: int = 1024,
+    max_output_length: int = 256,
+    save_dir: Optional[str] = None
+) -> Dict:
+    """
+    Evaluate summarization using forward passes (compatible with your hooks).
+    This method uses your existing forward pass approach.
+    
+    Args:
+        model: Your model with hooks attached
+        tokenizer: Model tokenizer
+        device: Device to run on
+        datasets: List of dataset names (e.g., ['multi_news', 'xsum'])
+        max_samples: Maximum samples to evaluate per dataset
+        max_input_length: Max tokens for input document
+        max_output_length: Max tokens to generate for summary
+        save_dir: Directory to save results
+    
+    Returns:
+        Dictionary with ROUGE scores per dataset
+    """
+    if datasets is None:
+        datasets = ['gov_report','multi_news', 'xsum', 'cnn_dailymail']
+    
+    rouge = evaluate.load('rouge')
+    results = {}
+    
+    print("\n" + "="*80)
+    print("SUMMARIZATION EVALUATION (Direct Forward Pass)")
+    print("="*80)
+    
+    for dataset_name in datasets:
+        print(f"\nEvaluating on {dataset_name}...")
+        
+        try:
+            # Load dataset
+            if dataset_name == 'multi_news':
+                dataset = dataset = load_dataset("jet-ai/longbench", "multi_news", split="test")
+                doc_key, summary_key = 'context', 'answers'
+            elif dataset_name == 'xsum':
+                dataset = load_dataset('xsum', split='test')
+                doc_key, summary_key = 'document', 'summary'
+            elif dataset_name == 'cnn_dailymail':
+                dataset = load_dataset('cnn_dailymail', '3.0.0', split='test')
+                doc_key, summary_key = 'article', 'highlights'
+            elif dataset_name == 'gov_report':
+                dataset = load_dataset('ccdv/govreport-summarization', split='test')
+                doc_key, summary_key = 'report', 'summary'
+            else:
+                print(f"Unknown dataset: {dataset_name}, skipping...")
+                continue
+            
+            # Limit samples if specified
+            if max_samples:
+                dataset = dataset.select(range(min(max_samples, len(dataset))))
+            
+            predictions = []
+            references = []
+            
+            for idx, example in enumerate(dataset):
+                if (idx + 1) % 10 == 0:
+                    print(f"  Processing {idx + 1}/{len(dataset)}...")
+                
+                # Tokenize input
+                input_text = f"Summarize the following:\n\n{example[doc_key]}\n\nSummary:"
+                if dataset_name == 'gov_report':
+                    input_text = (
+                        "Write a detailed, structured summary of the following government report:\n\n"
+                        f"{example[doc_key]}\n\nSummary:"
+                    )
+                if dataset_name == 'multi_news':
+                    input_text = (
+                        "You are a professional news editor.\n"
+                        "Read the following collection of news articles and write a "
+                        "comprehensive summary of about 400–600 tokens that captures all major topics, "
+                        "transitions, and important facts.\n\n"
+                        f"{example[doc_key]}\n\nSummary:"
+                    )
+                input_ids = tokenizer.encode(
+                    input_text, 
+                    max_length=max_input_length, 
+                    truncation=True,
+                    return_tensors='pt'
+                ).to(device)
+                
+                # Generate using forward passes (like your existing code)
+                with torch.no_grad():
+                    # Prefill phase
+                    outputs = model(input_ids, use_cache=True)
+                    past_key_values = outputs.past_key_values
+                    
+                    # Generation phase
+                    generated_tokens = []
+                    next_token_logits = outputs.logits[:, -1, :]
+                    next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+                    generated_tokens.append(next_token.item())
+                    
+                    all_tokens = torch.cat([input_ids, next_token], dim=-1)
+                    
+                    # Continue generation
+                    for _ in range(max_output_length - 1):
+                        outputs = model(
+                            all_tokens[:, -1:],
+                            past_key_values=past_key_values,
+                            use_cache=True
+                        )
+                        next_token_logits = outputs.logits[:, -1, :]
+                        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+                        
+                        # Check for EOS token
+                        if next_token.item() == tokenizer.eos_token_id:
+                            break
+                        
+                        generated_tokens.append(next_token.item())
+                        all_tokens = torch.cat([all_tokens, next_token], dim=-1)
+                        past_key_values = outputs.past_key_values
+                
+                # Decode prediction
+                prediction = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                predictions.append(prediction)
+                
+                # Handle summary_key - some datasets have list of summaries (like multi_news)
+                reference = example[summary_key]
+                if isinstance(reference, list):
+                    reference = reference[0]  # Take first reference if it's a list
+                references.append(reference)
+                
+                # Print sample outputs for first few examples
+                print(f"\n  ---[[ SAMPLE {idx + 1} ]]---")
+                print(f"  Input Document (truncated):")
+                print(f"  {example[doc_key]}...")
+                print(f"  Generated Summary ({len(generated_tokens)} tokens):")
+                print(f"  {prediction}")
+                print(f"  Reference Summary:")
+                print(f"  {example[summary_key]}")
+                print(f"  ---END OF TEXT---\n")
+            
+            # Calculate ROUGE scores
+            scores = rouge.compute(
+                predictions=predictions,
+                references=references,
+                use_stemmer=True
+            )
+            
+            results[dataset_name] = {
+                'rouge1': scores['rouge1'],
+                'rouge2': scores['rouge2'],
+                'rougeL': scores['rougeL'],
+                'rougeLsum': scores['rougeLsum'],
+                'num_samples': len(predictions)
+            }
+            
+            print(f"\n{dataset_name} Results:")
+            print(f"  ROUGE-1: {scores['rouge1']:.4f}")
+            print(f"  ROUGE-2: {scores['rouge2']:.4f}")
+            print(f"  ROUGE-L: {scores['rougeL']:.4f}")
+            print(f"  Samples: {len(predictions)}")
+            
+        except Exception as e:
+            print(f"Error evaluating {dataset_name}: {e}")
+            continue
+    
+    # Save results
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        output_path = os.path.join(save_dir, "summarization_results.json")
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"\nResults saved to: {output_path}")
+    
+    print("="*80 + "\n")
     return results
 
 if __name__ == '__main__':

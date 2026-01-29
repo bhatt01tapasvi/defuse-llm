@@ -16,39 +16,49 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
-DEVICE=0                # CUDA device ID
+DEVICE=4                # CUDA device ID
 
 # Model configuration
 MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", etc.
-CACHE_DIR="llm_weights"
 NUM_LAYERS=28              # Leave empty for auto-detection (12 for GPT2, 32 for Llama-3.1-8B)
+
+# MODEL="meta-llama/Llama-3.1-8B"
+# NUM_LAYERS=32              # Leave empty for auto-detection (12 for GPT2, 32 for Llama-3.1-8B)
+
+#MODEL="meta-llama/Llama-2-7b-hf" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", etc.
+#NUM_LAYERS=32 
+
+# MODEL="meta-llama/Llama-2-13b-hf" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", etc.
+# NUM_LAYERS=40 
+
+CACHE_DIR="llm_weights"
 
 # Prompt configuration
 PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
 #college_computer_science_corpus abstract_algebra_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus
-PROMPT_SUBJECTS="college_computer_science marketing"  # Space-separated list of subjects
+PROMPT_SUBJECTS="astronomy business_ethics college_computer_science college_mathematics world_religions high_school_mathematics econometrics global_facts electrical_engineering high_school_statistics formal_logic abstract_algebra professional_accounting international_law high_school_biology high_school_world_history marketing philosophy professional_law professional_medicine"  # Space-separated list of subjects
 #PROMPT_SUBJECTS="imc_key imc_synonym_key imc_definition imc_definition_v2 imc_definition_v3 imc_synonym imc_technical imc_para imc_layman imc_analogy imc_detail imc_detail_v2 imc_application"  # Space-separated list of subjects
                                # For custom: "imc pizzas actress", etc.
                                # For mmlu: "college_computer_science abstract_algebra", etc.
-PROMPT_LENGTH=2000             # Leave empty for None (no prompt length limit)
+PROMPT_LENGTH=500             # Leave empty for None (no prompt length limit)
 CUSTOM_PROMPT_TEXT=""          # Custom text (overrides PROMPT_SUBJECT if set)
 
 # Layer specification
-LAYERS="0"                   # Options: 
+LAYERS="all"                   # Options: 
                                #   "all" - test all layers
                                #   "0,1,2,5-8" - individual layers (will test each separately)
                                #   "(0-4),(5-9),(10-14),(15-19),(20-24),(25-27)"   - groups (will test each group)
 
 # Pruning configuration
-KEEP_RATES="0.25 0.5"               # Space-separated keep rates (proportion to KEEP)
+KEEP_RATES="0.5"               # Space-separated keep rates (proportion to KEEP)
                                # E.g., "0.9 0.7 0.5 0.3 0.1"
 BASE_KEEP_RATE=""              # For marginal analysis: base rate for all layers
                                # If set (e.g., "0.5"), will test varying one layer at a time
                                # while keeping others at this rate
 MASKING_STEP=0                 # Step at which to start masking
 GENERATION=0                   # Number of tokens to generate
-EMA_DECAY=1.0
-RANKING_METHOD="magnitude"    # Method to rank neurons for pruning - max, mean, combined, product
+EMA_DECAY=""
+RANKING_METHOD="max"    # Method to rank neurons for pruning - max, mean, combined, product
 PRUNE_STRATEGY="topk"        # Pruning strategy - topk, auto
 
 # Experiment control
@@ -58,15 +68,18 @@ SAVE_ACTIVATIONS=false         # Set to true to save activations during model ru
 
 # Evaluation configuration - Perplexity
 EVAL_PERPLEXITY=false           # Set to true to enable perplexity evaluation
-PPL_DATASETS="custom mmlu"     # Options: "custom" "mmlu" (space-separated)
-PPL_SUBJECTS="abstract_algebra_corpus anne_corpus college_computer_science_corpus food_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
-PPL_MAX_SAMPLES=200            # Max samples for perplexity eval (leave empty for all)
+#PPL_DATASETS="custom mmlu"     # Options: "custom" "mmlu" (space-separated)
+#PPL_SUBJECTS="abstract_algebra_corpus anne_corpus college_computer_science_corpus food_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
+PPL_DATASETS="wikitext2"     # Options: "custom" "mmlu" (space-separated)
+#PPL_SUBJECTS="abstract_algebra_corpus anne_corpus college_computer_science_corpus food_corpus high_school_biology_corpus high_school_world_history_corpus marketing_corpus philosophy_corpus professional_law_corpus college_computer_science abstract_algebra high_school_biology high_school_world_history"
+PPL_SUBJECTS="internet"
+PPL_MAX_SAMPLES=2048            # Max samples for perplexity eval (leave empty for all)
 
 # Evaluation configuration - MMLU
 EVAL_MMLU=true                 # Set to true to enable MMLU evaluation
-MMLU_DATASETS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"
-MMLU_SHOTS=0                   # Number of few-shot examples
-MMLU_MAX_SAMPLES=200           # Max samples per MMLU task (leave empty for all)
+MMLU_DATASETS="astronomy business_ethics college_computer_science college_mathematics world_religions high_school_mathematics econometrics global_facts electrical_engineering high_school_statistics formal_logic abstract_algebra professional_accounting international_law high_school_biology high_school_world_history marketing philosophy professional_law professional_medicine"
+MMLU_SHOTS=5                   # Number of few-shot examples
+MMLU_MAX_SAMPLES="100"           # Max samples per MMLU task (leave empty for all)
 
 # Evaluation configuration - General NLP
 EVAL_GENERAL_NLP=false         # Set to true to enable general NLP evaluation
@@ -74,7 +87,7 @@ GENERAL_NLP_DATASETS=""        # Options: "boolq rte hellaswag winogrande arc_ea
 GENERAL_NLP_MAX_SAMPLES=""     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/ranking_study_sanity_long"
+BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/layer_analysis/final_experiments/heat_maps"
 
 # ============================================================================
 # SETUP
@@ -101,8 +114,8 @@ if [ -z "$EXPERIMENT_NAME" ]; then
     if [[ "$LAYERS" == *"("* ]] && [[ "$LAYERS" == *")"* ]]; then
         MODE="${MODE}_group"
     fi
-    #EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${MODE}_${TIMESTAMP}"
-    EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${MODE}_${SIGNATURE}"
+    EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${MODE}_${TIMESTAMP}"
+    #EXPERIMENT_NAME="${MODEL_SAFE_NAME}_${MODE}_${SIGNATURE}"
 fi
 
 RESULTS_DIR="${BASE_RESULTS_DIR}/${EXPERIMENT_NAME}"
@@ -269,7 +282,8 @@ CMD="CUDA_VISIBLE_DEVICES=$DEVICE stdbuf -oL -eL python -u layer_analysis.py \
     --prune_strategy \"$PRUNE_STRATEGY\" \
     --generation $GENERATION \
     --prompt_type \"$PROMPT_TYPE\" \
-    --prompt_subject $PROMPT_SUBJECTS"
+    --prompt_subject $PROMPT_SUBJECTS \
+    --verbose"
 
 # Add optional arguments
 if [ -n "$NUM_LAYERS" ]; then
