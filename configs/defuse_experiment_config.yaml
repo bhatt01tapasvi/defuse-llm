@@ -1,0 +1,97 @@
+# Experiment Configuration for Defuse LLM
+# Replaces run_experiment.sh
+
+experiment:
+  name: "prune_experiment" # Will be suffixed with prune percent if not overridden
+  mode: "manual"           # Options: "manual", "auto"
+  device: 6                # CUDA device ID (can be overridden by CUDA_VISIBLE_DEVICES)
+  seed: 0
+
+model:
+  name: "Qwen/Qwen3-4B-Base"
+  # Other options:
+  # name: "mistralai/Mistral-7B-Instruct-v0.3"
+  # name: "EleutherAI/gpt-neox-20b"
+  # name: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+  # name: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+  # name: "Qwen/Qwen3-14B-Base"
+  # name: "meta-llama/Llama-2-7b-hf"
+  
+  cache_dir: "llm_weights"
+  save_path: null  # Path to save the model (leave null to skip)
+  save_activations: false
+
+knowledge_drift:
+  enabled: false
+
+prompt:
+  type: "mmlu"         # Options: "custom", "mmlu"
+  subject: "astronomy business_ethics college_computer_science college_mathematics world_religions high_school_mathematics econometrics global_facts electrical_engineering high_school_statistics formal_logic abstract_algebra professional_accounting international_law high_school_biology high_school_world_history marketing philosophy professional_law professional_medicine"
+  # For custom: "imc", "pizzas", "actress", etc.
+  length: 10000        # Max tokens (null for no limit)
+  custom_text: null    # Custom prompt text (leave null to use subject)
+
+pruning:
+  enabled: true
+  layer_topk: null     # Example: "0:0.9,1:0.8" or "all:0.9"
+  # Pre-defined topk configs from shell script can be pasted here as needed
+  
+  masking_step: null
+  release_step: null
+  ema_decay: null      # null for L2 norm
+  ranking_method: "magnitude"
+  prune_strategy: "topk"
+  total_prune_percent: 0.0
+  generation_tokens: 0
+  verbose: true
+
+evaluation:
+  perplexity:
+    enabled: true
+    datasets: 
+      - "wikitext2"
+    subjects: 
+      - "college_computer_science"
+      - "abstract_algebra"
+      - "high_school_biology"
+      - "high_school_world_history"
+      - "marketing"
+      - "philosophy"
+      - "professional_law"
+    max_samples: null
+    
+  mmlu:
+    enabled: false
+    datasets:
+      - "astronomy"
+      - "business_ethics"
+      - "college_computer_science"
+      - "college_mathematics"
+      - "world_religions"
+      - "high_school_mathematics"
+      - "econometrics"
+      - "global_facts"
+      - "electrical_engineering"
+      - "high_school_statistics"
+      - "formal_logic"
+      - "abstract_algebra"
+      - "professional_accounting"
+      - "international_law"
+      - "high_school_biology"
+      - "high_school_world_history"
+      - "marketing"
+      - "philosophy"
+      - "professional_law"
+      - "professional_medicine"
+    shots: 5
+    max_samples: 100
+    
+  general_nlp:
+    enabled: false
+    datasets:
+      - "boolq"
+    max_samples: 10
+
+results:
+  # Base directory for results
+  base_dir: "/users/grad/abhishektyagi/wanda/wanda/results/lm_eval_all/perplexity"

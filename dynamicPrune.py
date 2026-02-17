@@ -1,11 +1,11 @@
 import argparse
+import yaml
 from collections import defaultdict
 import os 
 import sys
 import numpy as np
 import torch
 import json
-from lib import data
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Force unbuffered output to prevent message interleaving in logs
@@ -416,6 +416,89 @@ def main():
     parser.add_argument('--summarization_datasets', nargs='+', default=['multi_news', 'xsum', 'cnn_dailymail'], help='Datasets for summarization eval')
     parser.add_argument('--summarization_max_samples', type=int, default=None, help='Max samples for summarization eval')
     parser.add_argument('--summarization_max_output', type=int, default=256, help='Max output tokens for summaries')
+    parser.add_argument('--config', type=str, default=None, help='Path to YAML configuration file')
+    
+    # Parse initial args to check for config
+    args, unknown = parser.parse_known_args()
+    
+    # Load config if provided
+    if args.config:
+        try:
+            with open(args.config, 'r') as f:
+                config = yaml.safe_load(f)
+            
+            # Helper to set args from config if not already set (or if we want config to override defaults but CLI to override config)
+            # Strategy: CLI args > Config > Defaults
+            # Since we already parsed args with defaults, we need to know if they were explicitly set.
+            # However, simpler approach: Update defaults in parser, then re-parse.
+            
+            # Map config structure to flat args
+            defaults = {}
+            if 'experiment' in config:
+                if 'mode' in config['experiment']: defaults['mode'] = config['experiment']['mode']
+                if 'seed' in config['experiment']: defaults['seed'] = config['experiment']['seed']
+                
+            if 'model' in config:
+                if 'name' in config['model']: defaults['model'] = config['model']['name']
+                if 'cache_dir' in config['model']: defaults['cache_dir'] = config['model']['cache_dir']
+                if 'save_path' in config['model']: defaults['save_model'] = config['model']['save_path']
+                if 'save_activations' in config['model']: defaults['save_activations'] = config['model']['save_activations']
+                
+            if 'knowledge_drift' in config:
+                if 'enabled' in config['knowledge_drift']: defaults['knowledge_drift'] = config['knowledge_drift']['enabled']
+                
+            if 'prompt' in config:
+                if 'type' in config['prompt']: defaults['prompt_type'] = config['prompt']['type']
+                if 'subject' in config['prompt']: defaults['prompt_subject'] = config['prompt']['subject']
+                if 'length' in config['prompt']: defaults['prompt_length'] = config['prompt']['length']
+                if 'custom_text' in config['prompt']: defaults['custom_prompt_text'] = config['prompt']['custom_text']
+                
+            if 'pruning' in config:
+                if 'layer_topk' in config['pruning']: defaults['layer_topk'] = config['pruning']['layer_topk']
+                if 'masking_step' in config['pruning']: defaults['maskingStep'] = config['pruning']['masking_step']
+                if 'release_step' in config['pruning']: defaults['releaseStep'] = config['pruning']['release_step']
+                if 'ema_decay' in config['pruning']: defaults['ema_decay'] = config['pruning']['ema_decay']
+                if 'ranking_method' in config['pruning']: defaults['ranking_method'] = config['pruning']['ranking_method']
+                if 'prune_strategy' in config['pruning']: defaults['prune_strategy'] = config['pruning']['prune_strategy']
+                if 'total_prune_percent' in config['pruning']: defaults['total_prune_percent'] = config['pruning']['total_prune_percent']
+                if 'generation_tokens' in config['pruning']: defaults['generation'] = config['pruning']['generation_tokens']
+                if 'verbose' in config['pruning']: defaults['verbose'] = config['pruning']['verbose']
+                
+            if 'evaluation' in config:
+                if 'perplexity' in config['evaluation']:
+                    if 'enabled' in config['evaluation']['perplexity']: defaults['eval_perplexity'] = config['evaluation']['perplexity']['enabled']
+                    if 'datasets' in config['evaluation']['perplexity']: defaults['ppl_datasets'] = config['evaluation']['perplexity']['datasets']
+                    if 'subjects' in config['evaluation']['perplexity']: defaults['ppl_subjects'] = config['evaluation']['perplexity']['subjects']
+                    if 'max_samples' in config['evaluation']['perplexity']: defaults['ppl_max_samples'] = config['evaluation']['perplexity']['max_samples']
+                    
+                if 'mmlu' in config['evaluation']:
+                    if 'enabled' in config['evaluation']['mmlu']: defaults['eval_mmlu'] = config['evaluation']['mmlu']['enabled']
+                    if 'datasets' in config['evaluation']['mmlu']: defaults['mmlu_datasets'] = config['evaluation']['mmlu']['datasets']
+                    if 'shots' in config['evaluation']['mmlu']: defaults['mmlu_shots'] = config['evaluation']['mmlu']['shots']
+                    if 'max_samples' in config['evaluation']['mmlu']: defaults['mmlu_max_samples'] = config['evaluation']['mmlu']['max_samples']
+                    
+                if 'general_nlp' in config['evaluation']:
+                    if 'enabled' in config['evaluation']['general_nlp']: defaults['eval_general_nlp'] = config['evaluation']['general_nlp']['enabled']
+                    if 'datasets' in config['evaluation']['general_nlp']: defaults['general_nlp_datasets'] = config['evaluation']['general_nlp']['datasets']
+                    if 'max_samples' in config['evaluation']['general_nlp']: defaults['general_nlp_max_samples'] = config['evaluation']['general_nlp']['max_samples']
+
+                if 'summarization' in config['evaluation']:
+                    if 'enabled' in config['evaluation']['summarization']: defaults['eval_summarization'] = config['evaluation']['summarization']['enabled']
+                    if 'datasets' in config['evaluation']['summarization']: defaults['summarization_datasets'] = config['evaluation']['summarization']['datasets']
+                    if 'max_samples' in config['evaluation']['summarization']: defaults['summarization_max_samples'] = config['evaluation']['summarization']['max_samples']
+                    if 'max_output' in config['evaluation']['summarization']: defaults['summarization_max_output'] = config['evaluation']['summarization']['max_output']
+
+            if 'results' in config:
+                if 'base_dir' in config['results']: defaults['save_res_dir'] = config['results']['base_dir']
+
+            # Set defaults
+            parser.set_defaults(**defaults)
+
+        except Exception as e:
+            print(f"Error loading config file: {e}")
+            sys.exit(1)
+            
+    # Re-parse args to allow CLI overrides
     args = parser.parse_args()
 
     profiler = MemoryProfiler(device='cuda:0')  # Use default, will update later if needed
