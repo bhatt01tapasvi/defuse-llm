@@ -21,19 +21,19 @@ DEVICE=6                  # CUDA device ID
 MODE="manual"             # Options: "manual", "auto"
 
 # Knowledge drift configuration
-KNOWLEDGE_DRIFT=true     # Enable knowledge drift evaluation
+KNOWLEDGE_DRIFT=false     # Enable knowledge drift evaluation
 
 #MODEL="mistralai/Mistral-7B-Instruct-v0.3"
 #MODEL="EleutherAI/gpt-neox-20b"
 #MODEL="deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 #MODEL="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
 #MODEL="Qwen/Qwen3-14B-Base"
-#MODEL="Qwen/Qwen3-4B-Base"
-MODEL="meta-llama/Llama-3.1-8B"
+MODEL="Qwen/Qwen3-4B-Base"
+# MODEL="meta-llama/Llama-3.1-8B"
 #MODEL="meta-llama/Llama-3.2-3B" # Options: "gpt2", "gpt2-xl", "meta-llama/Llama-3.1-8B", "meta-llama/Llama-3.2-3B","Llama-2-7b-hf"  etc.
 #MODEL="meta-llama/Llama-2-7b-hf"
 #MODEL="meta-llama/Llama-2-13b-hf"
-CACHE_DIR="llm_weights"
+CACHE_DIR="llm_weights" #specify pre-downloaded path to prevent again download. give full path
 SEED=0                    # Random seed for reproducibility
 SAVE_MODEL=""             # Path to save the model (leave empty to skip)
 
