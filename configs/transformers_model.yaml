@@ -1,4 +1,3 @@
-
 experiment:
   mode: manual
   seed: 0
@@ -19,16 +18,16 @@ knowledge_drift:
 
 prompt:
   type: custom
-  subject: null
-  length: null
-  custom_text: null
+  subject:
+  length:
+  custom_text:
 
 pruning:
   enabled: true
-  layer_topk: null
-  masking_step: null
-  release_step: null
-  ema_decay: null
+  layer_topk:
+  masking_step:
+  release_step:
+  ema_decay:
   ranking_method: "magnitude"
   prune_strategy: "topk"
   total_prune_percent: 0.0
@@ -39,22 +38,22 @@ evaluation:
   perplexity:
     enabled: false
     datasets: ["custom", "mmlu"]
-    subjects: null
-    max_samples: null
+    subjects:
+    max_samples:
   mmlu:
     enabled: false
     datasets: ["college_computer_science", "machine_learning", "electrical_engineering", "business_ethics", "world_religions", "prehistory", "moral_disputes"]
     shots: 0
-    max_samples: null
+    max_samples:
   general_nlp:
     enabled: false
-    datasets: null
-    max_samples: null
+    datasets:
+    max_samples:
   summarization:
     enabled: false
     datasets: ['multi_news', 'xsum', 'cnn_dailymail']
-    max_samples: null
+    max_samples:
     max_output: 256
 
 results:
-  base_dir: null
+  base_dir:
