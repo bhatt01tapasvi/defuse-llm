@@ -546,7 +546,9 @@ def main():
                 if 'seed' in config['experiment']: defaults['seed'] = config['experiment']['seed']
                 
             if 'model' in config:
-                if 'name' in config['model']: defaults['model'] = config['model']['name']
+                if 'path' in config['model']: defaults['model'] = config['model']['path']
+                elif 'name' in config['model']: defaults['model'] = config['model']['name']
+                
                 if 'cache_dir' in config['model']: defaults['cache_dir'] = config['model']['cache_dir']
                 if 'save_path' in config['model']: defaults['save_model'] = config['model']['save_path']
                 if 'save_activations' in config['model']: defaults['save_activations'] = config['model']['save_activations']
