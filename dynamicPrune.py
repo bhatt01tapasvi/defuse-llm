@@ -224,15 +224,22 @@ def start_server(model, tokenizer, host, port):
         try:
             inputs = SERVER_TOKENIZER(request.prompt, return_tensors="pt").to(SERVER_MODEL.device)
             
+            # Handle zero temperature (greedy decoding)
+            do_sample = request.do_sample
+            temperature = request.temperature
+            if temperature < 1e-4:
+                do_sample = False
+                temperature = 1.0  # Temperature is ignored when do_sample=False, but must be > 0
+            
             with torch.no_grad():
                 outputs = SERVER_MODEL.generate(
                     **inputs,
                     max_new_tokens=request.max_new_tokens,
-                    temperature=request.temperature,
+                    temperature=temperature,
                     top_p=request.top_p,
                     top_k=request.top_k,
                     repetition_penalty=request.repetition_penalty,
-                    do_sample=request.do_sample,
+                    do_sample=do_sample,
                     pad_token_id=SERVER_TOKENIZER.eos_token_id
                 )
             
@@ -276,15 +283,22 @@ def start_server(model, tokenizer, host, port):
             # Tokenize
             inputs = SERVER_TOKENIZER(prompt, return_tensors="pt").to(SERVER_MODEL.device)
             
+            # Handle zero temperature (greedy decoding)
+            do_sample = request.do_sample
+            temperature = request.temperature
+            if temperature < 1e-4:
+                do_sample = False
+                temperature = 1.0  # Temperature is ignored when do_sample=False, but must be > 0
+            
             with torch.no_grad():
                 outputs = SERVER_MODEL.generate(
                     **inputs,
                     max_new_tokens=request.max_tokens,
-                    temperature=request.temperature,
+                    temperature=temperature,
                     top_p=request.top_p,
                     top_k=request.top_k,
                     repetition_penalty=request.repetition_penalty,
-                    do_sample=request.do_sample,
+                    do_sample=do_sample,
                     pad_token_id=SERVER_TOKENIZER.eos_token_id
                 )
             
