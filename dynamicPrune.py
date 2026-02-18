@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import torch
 import json
+import subprocess
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Force unbuffered output to prevent message interleaving in logs
@@ -98,8 +99,47 @@ def detect_model_type(model):
         else:
             # Default to llama for LLaMA and similar architectures
             return 'llama'
-    else:
-        raise ValueError("Unknown model architecture. Supported: GPT2, LLaMA, Qwen3, Mistral, GPT-NeoX")
+
+def get_best_gpu():
+    """
+    Find the GPU with the most free memory using nvidia-smi.
+    Returns the index of the best GPU (integer).
+    """
+    try:
+        # Run nvidia-smi to get memory usage
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.free,utilization.gpu', '--format=csv,nounits,noheader'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+        )
+        
+        # Parse output
+        lines = result.stdout.strip().split('\n')
+        best_gpu_index = 0
+        max_free_memory = -1
+        
+        print("\nGPU Status:")
+        for i, line in enumerate(lines):
+            try:
+                parts = line.split(',')
+                free_mem = int(parts[0].strip())
+                utilization = int(parts[1].strip())
+                print(f"  GPU {i}: {free_mem}MiB free, {utilization}% utilized")
+                
+                if free_mem > max_free_memory:
+                    max_free_memory = free_mem
+                    best_gpu_index = i
+            except (ValueError, IndexError):
+                continue
+                
+        print(f"Selected GPU {best_gpu_index} with {max_free_memory}MiB free memory.\n")
+        return best_gpu_index
+        
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Warning: nvidia-smi not available or failed. Defaulting to GPU 0.")
+        return 0
+    except Exception as e:
+        print(f"Warning: Error detecting best GPU: {e}. Defaulting to GPU 0.")
+        return 0
 
 def parse_layer_topk(layer_spec: str, num_layers: int, intermediate_size: int) -> dict:
     """
@@ -510,6 +550,12 @@ def main():
         else:
              print(f"cache_dir {args.cache_dir} provided but does not appear to contain a model (no config.json). Using default behavior.")
 
+    # Auto-select best GPU
+    best_gpu = get_best_gpu()
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
+    print(f"Auto-selected GPU {best_gpu} and set CUDA_VISIBLE_DEVICES={best_gpu}")
+    
+    # Note: After setting CUDA_VISIBLE_DEVICES, cuda:0 refers to the physical best_gpu
     profiler = MemoryProfiler(device='cuda:0')  # Use default, will update later if needed
     profiler.snapshot("startup")
 
