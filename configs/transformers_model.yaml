@@ -3,7 +3,7 @@ experiment:
   seed: 0
 
 model:
-  path: /home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/outputs/plasticity_low-qwen3-1.7b-personality-merged
+  path: /home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/outputs/stability_low-qwen3-1.7b-personality-merged
   # name: plasticity_low-qwen3-1.7b-personality-merged # Optional, using path for loading
   cache_dir: llm_weights
   save_path: llm_weights

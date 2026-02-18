@@ -68,10 +68,39 @@ print('transformers', version('transformers'))
 print('accelerate', version('accelerate'))
 print('# of gpus: ', torch.cuda.device_count())
 
-def get_llm(model_name, cache_dir="llm_weights"):
+def get_llm(model_name, cache_dir="llm_weights", dtype="auto", max_model_len=None):
+    # Determine torch dtype based on argument
+    if dtype == "float16":
+        torch_dtype = torch.float16
+    elif dtype == "bfloat16":
+        torch_dtype = torch.bfloat16
+    else: # auto
+        # Check if bfloat16 is supported (Ampere or newer)
+        if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            print("Auto-selected dtype: bfloat16")
+            torch_dtype = torch.bfloat16
+        else:
+            print("Auto-selected dtype: float16")
+            torch_dtype = torch.float16
+
+    # Load config first to potentially modify max_position_embeddings
+    from transformers import AutoConfig
+    config = AutoConfig.from_pretrained(model_name, cache_dir=cache_dir)
+    
+    if max_model_len is not None:
+        if hasattr(config, "max_position_embeddings"):
+            print(f"Overriding max_position_embeddings: {config.max_position_embeddings} -> {max_model_len}")
+            config.max_position_embeddings = max_model_len
+        elif hasattr(config, "seq_length"):
+             print(f"Overriding seq_length: {config.seq_length} -> {max_model_len}")
+             config.seq_length = max_model_len
+        else:
+            print(f"Warning: Could not find max_position_embeddings or seq_length in config to override with max_model_len={max_model_len}")
+
     model = AutoModelForCausalLM.from_pretrained(
         model_name, 
-        torch_dtype=torch.float16, 
+        config=config,
+        torch_dtype=torch_dtype, 
         cache_dir=cache_dir, 
         low_cpu_mem_usage=True, 
         device_map="auto"
@@ -164,6 +193,17 @@ class GenerateRequest(BaseModel):
     repetition_penalty: float = 1.0
     do_sample: bool = True
 
+class ChatCompletionRequest(BaseModel):
+    messages: List[Dict]
+    tools: Optional[List[Dict]] = None
+    tool_choice: Optional[str] = None
+    max_tokens: Optional[int] = 256
+    temperature: float = 0.7
+    top_p: float = 0.9
+    top_k: int = 50
+    repetition_penalty: float = 1.0
+    do_sample: bool = True
+
 SERVER_MODEL = None
 SERVER_TOKENIZER = None
 
@@ -203,6 +243,78 @@ def start_server(model, tokenizer, host, port):
 
             return {"choices": [{"text": generated_text}]}
         except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/v1/chat/completions")
+    async def chat_completion(request: ChatCompletionRequest):
+        global SERVER_MODEL, SERVER_TOKENIZER
+        try:
+            # Apply chat template
+            if request.tools:
+                # If tools are provided, try to use them in the template
+                try:
+                    prompt = SERVER_TOKENIZER.apply_chat_template(
+                        request.messages, 
+                        tools=request.tools, 
+                        tokenize=False, 
+                        add_generation_prompt=True
+                    )
+                except Exception as e:
+                    print(f"Warning: Tokenizer failed to apply tools template: {e}. Falling back to standard template.")
+                    prompt = SERVER_TOKENIZER.apply_chat_template(
+                        request.messages, 
+                        tokenize=False, 
+                        add_generation_prompt=True
+                    )
+            else:
+                prompt = SERVER_TOKENIZER.apply_chat_template(
+                    request.messages, 
+                    tokenize=False, 
+                    add_generation_prompt=True
+                )
+            
+            # Tokenize
+            inputs = SERVER_TOKENIZER(prompt, return_tensors="pt").to(SERVER_MODEL.device)
+            
+            with torch.no_grad():
+                outputs = SERVER_MODEL.generate(
+                    **inputs,
+                    max_new_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    top_k=request.top_k,
+                    repetition_penalty=request.repetition_penalty,
+                    do_sample=request.do_sample,
+                    pad_token_id=SERVER_TOKENIZER.eos_token_id
+                )
+            
+            # Decode
+            generated_ids = outputs[0][inputs.input_ids.shape[1]:] # Truncate input
+            generated_text = SERVER_TOKENIZER.decode(generated_ids, skip_special_tokens=True)
+            
+            # Construct response
+            return {
+                "id": "chatcmpl-defuse",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "defuse-llm",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": generated_text
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": inputs.input_ids.shape[1],
+                    "completion_tokens": len(generated_ids),
+                    "total_tokens": inputs.input_ids.shape[1] + len(generated_ids)
+                }
+            }
+
+        except Exception as e:
+            print(f"Error in chat completion: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
     print(f"Starting server at {host}:{port}")
@@ -525,6 +637,12 @@ def main():
     parser.add_argument('--summarization_max_output', type=int, default=256, help='Max output tokens for summaries')
     parser.add_argument('--config', type=str, default=None, help='Path to YAML configuration file')
     
+    # New VLLM-parity arguments
+    parser.add_argument('--dtype', type=str, default='auto', choices=['auto', 'float16', 'bfloat16'],
+                        help='Data type for model weights and activations')
+    parser.add_argument('--max_model_len', type=int, default=None,
+                        help='Model context length. If unspecified, will use model default.')
+    
     # Parse initial args to check for config
     args, unknown = parser.parse_known_args()
     
@@ -607,6 +725,11 @@ def main():
             else:
                 defaults['server_enabled'] = False
 
+            # VLLM Parity Configs
+            if 'model' in config:
+                if 'dtype' in config['model']: defaults['dtype'] = config['model']['dtype']
+                if 'max_model_len' in config['model']: defaults['max_model_len'] = config['model']['max_model_len']
+
             # Set defaults
             parser.set_defaults(**defaults)
 
@@ -655,7 +778,7 @@ def main():
     times['start'] = time.time()
     
     profiler.start("model_loading")
-    model = get_llm(args.model, args.cache_dir)
+    model = get_llm(args.model, args.cache_dir, dtype=args.dtype, max_model_len=args.max_model_len)
     times['model_load'] = time.time() - times['start']
     model.eval()
     if "gpt-neox" in args.model.lower():
