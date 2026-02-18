@@ -33,21 +33,21 @@ prompt:
 
 pruning:
   enabled: true
-  layer_topk: null     # Example: "0:0.9,1:0.8" or "all:0.9"
+  layer_topk: "all:0.5"     # Example: "0:0.9,1:0.8" or "all:0.9"
   # Pre-defined topk configs from shell script can be pasted here as needed
   
-  masking_step: null
+  masking_step: 0
   release_step: null
   ema_decay: null      # null for L2 norm
   ranking_method: "magnitude"
   prune_strategy: "topk"
-  total_prune_percent: 0.0
+  total_prune_percent: 50.0
   generation_tokens: 0
   verbose: true
 
 evaluation:
   perplexity:
-    enabled: true
+    enabled: false
     datasets: 
       - "wikitext2"
     subjects: 
