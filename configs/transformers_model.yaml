@@ -1,0 +1,60 @@
+
+experiment:
+  mode: manual
+  seed: 0
+
+model:
+  path: Qwen
+  name: Qwen3-4B
+  cache_dir: /home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/stock-hf-models/Qwen3-4B/
+  save_path: llm_weights
+  save_activations: false
+
+server:
+  host: 0.0.0.0
+  port: 8005
+
+knowledge_drift:
+  enabled: false
+
+prompt:
+  type: custom
+  subject: null
+  length: null
+  custom_text: null
+
+pruning:
+  enabled: true
+  layer_topk: null
+  masking_step: null
+  release_step: null
+  ema_decay: null
+  ranking_method: "magnitude"
+  prune_strategy: "topk"
+  total_prune_percent: 0.0
+  generation_tokens: 0
+  verbose: true
+
+evaluation:
+  perplexity:
+    enabled: false
+    datasets: ["custom", "mmlu"]
+    subjects: null
+    max_samples: null
+  mmlu:
+    enabled: false
+    datasets: ["college_computer_science", "machine_learning", "electrical_engineering", "business_ethics", "world_religions", "prehistory", "moral_disputes"]
+    shots: 0
+    max_samples: null
+  general_nlp:
+    enabled: false
+    datasets: null
+    max_samples: null
+  summarization:
+    enabled: false
+    datasets: ['multi_news', 'xsum', 'cnn_dailymail']
+    max_samples: null
+    max_output: 256
+
+results:
+  base_dir: null

@@ -7,7 +7,19 @@ import numpy as np
 import torch
 import json
 import subprocess
+import subprocess
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# Server imports
+try:
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse
+    import uvicorn
+    from pydantic import BaseModel
+    SERVER_AVAILABLE = True
+except ImportError:
+    SERVER_AVAILABLE = False
+    print("Warning: fastapi/uvicorn not installed. Server mode disabled.")
 
 # Force unbuffered output to prevent message interleaving in logs
 sys.stdout.reconfigure(line_buffering=True)
@@ -140,6 +152,61 @@ def get_best_gpu():
     except Exception as e:
         print(f"Warning: Error detecting best GPU: {e}. Defaulting to GPU 0.")
         return 0
+
+
+# Server Classes and Functions
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 256
+    temperature: float = 0.7
+    top_p: float = 0.9
+    top_k: int = 50
+    repetition_penalty: float = 1.0
+    do_sample: bool = True
+
+SERVER_MODEL = None
+SERVER_TOKENIZER = None
+
+def start_server(model, tokenizer, host, port):
+    if not SERVER_AVAILABLE:
+        print("Error: Server modules not available.")
+        return
+
+    global SERVER_MODEL, SERVER_TOKENIZER
+    SERVER_MODEL = model
+    SERVER_TOKENIZER = tokenizer
+
+    app = FastAPI(title="Defuse LLM Server")
+
+    @app.post("/v1/completions")
+    async def generate_completion(request: GenerateRequest):
+        global SERVER_MODEL, SERVER_TOKENIZER
+        try:
+            inputs = SERVER_TOKENIZER(request.prompt, return_tensors="pt").to(SERVER_MODEL.device)
+            
+            with torch.no_grad():
+                outputs = SERVER_MODEL.generate(
+                    **inputs,
+                    max_new_tokens=request.max_new_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    top_k=request.top_k,
+                    repetition_penalty=request.repetition_penalty,
+                    do_sample=request.do_sample,
+                    pad_token_id=SERVER_TOKENIZER.eos_token_id
+                )
+            
+            generated_text = SERVER_TOKENIZER.decode(outputs[0], skip_special_tokens=True)
+            # Remove prompt from generated text if model includes it
+            if generated_text.startswith(request.prompt):
+                generated_text = generated_text[len(request.prompt):]
+
+            return {"choices": [{"text": generated_text}]}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    print(f"Starting server at {host}:{port}")
+    uvicorn.run(app, host=host, port=port)
 
 def parse_layer_topk(layer_spec: str, num_layers: int, intermediate_size: int) -> dict:
     """
@@ -531,6 +598,13 @@ def main():
             if 'results' in config:
                 if 'base_dir' in config['results']: defaults['save_res_dir'] = config['results']['base_dir']
 
+            if 'server' in config:
+                defaults['server_host'] = config['server'].get('host', '0.0.0.0')
+                defaults['server_port'] = config['server'].get('port', 8000)
+                defaults['server_enabled'] = True
+            else:
+                defaults['server_enabled'] = False
+
             # Set defaults
             parser.set_defaults(**defaults)
 
@@ -714,6 +788,14 @@ def main():
         defuse_args=args
     )
     profiler.end("hook_setup")
+
+    # START SERVER IF ENABLED
+    if hasattr(args, 'server_enabled') and args.server_enabled:
+        print("\n" + "="*80)
+        print("STARTING LLM SERVER")
+        print("="*80)
+        start_server(model, tokenizer, args.server_host, args.server_port)
+        return # Exit main after server stops
 
 
     if args.mode == 'manual':
