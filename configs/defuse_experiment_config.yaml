@@ -8,7 +8,7 @@ experiment:
   seed: 0
 
 model:
-  name: "Qwen/Qwen3-4B-Base"
+  name: "Qwen/Qwen3-4B"
   # Other options:
   # name: "mistralai/Mistral-7B-Instruct-v0.3"
   # name: "EleutherAI/gpt-neox-20b"
@@ -17,7 +17,7 @@ model:
   # name: "Qwen/Qwen3-14B-Base"
   # name: "meta-llama/Llama-2-7b-hf"
   
-  cache_dir: "llm_weights"
+  cache_dir: "/home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/stock-hf-models/Qwen3-4B"
   save_path: null  # Path to save the model (leave null to skip)
   save_activations: false
 

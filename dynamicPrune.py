@@ -501,6 +501,15 @@ def main():
     # Re-parse args to allow CLI overrides
     args = parser.parse_args()
 
+    # Logic to handle local model path if cache_dir is provided and contains model files
+    if args.cache_dir and os.path.exists(args.cache_dir):
+        # Check if it looks like a model directory (has config.json)
+        if os.path.exists(os.path.join(args.cache_dir, "config.json")):
+            print(f"Found model in cache_dir: {args.cache_dir}. Using it as model path.")
+            args.model = args.cache_dir
+        else:
+             print(f"cache_dir {args.cache_dir} provided but does not appear to contain a model (no config.json). Using default behavior.")
+
     profiler = MemoryProfiler(device='cuda:0')  # Use default, will update later if needed
     profiler.snapshot("startup")
 
