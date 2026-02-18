@@ -3,7 +3,7 @@ experiment:
   seed: 0
 
 model:
-  path: /home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/outputs/stability_low-qwen3-1.7b-personality-merged
+  path: /home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/stock-hf-models/Qwen3-4B
   # name: plasticity_low-qwen3-1.7b-personality-merged # Optional, using path for loading
   cache_dir: llm_weights
   save_path: llm_weights
@@ -11,7 +11,7 @@ model:
 
 server:
   host: 0.0.0.0
-  port: 8005
+  port: 8000
 
 knowledge_drift:
   enabled: false
@@ -24,13 +24,13 @@ prompt:
 
 pruning:
   enabled: true
-  layer_topk:
-  masking_step:
-  release_step:
-  ema_decay:
+  layer_topk: "all:0.75"
+  masking_step: 0
+  release_step: null
+  ema_decay: null
   ranking_method: "magnitude"
   prune_strategy: "topk"
-  total_prune_percent: 0.0
+  total_prune_percent: 50.0
   generation_tokens: 0
   verbose: true
 
