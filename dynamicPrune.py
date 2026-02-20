@@ -306,19 +306,62 @@ def start_server(model, tokenizer, host, port):
             generated_ids = outputs[0][inputs.input_ids.shape[1]:] # Truncate input
             generated_text = SERVER_TOKENIZER.decode(generated_ids, skip_special_tokens=True)
             
+            import re
+            import uuid
+            
+            tool_calls = []
+            content = generated_text
+            
+            # Match <tool_call>...</tool_call> blocks
+            tool_call_pattern = re.compile(r'<tool_call>\n?(.*?)\n?</tool_call>', re.DOTALL)
+            matches = tool_call_pattern.finditer(generated_text)
+            
+            for match in matches:
+                try:
+                    tool_json_str = match.group(1).strip()
+                    tool_data = json.loads(tool_json_str)
+                    
+                    if "name" in tool_data and "arguments" in tool_data:
+                        # Convert dict arguments back to JSON string or keep as is if it's a string
+                        args = tool_data["arguments"]
+                        args_str = json.dumps(args) if isinstance(args, dict) else str(args)
+                            
+                        tool_calls.append({
+                            "id": f"call_{uuid.uuid4().hex[:12]}",
+                            "type": "function",
+                            "function": {
+                                "name": tool_data["name"],
+                                "arguments": args_str
+                            }
+                        })
+                except Exception as parse_err:
+                    print(f"Failed to parse tool call JSON: {parse_err}")
+            
+            if tool_calls:
+                content = tool_call_pattern.sub('', generated_text).strip()
+                finish_reason = "tool_calls"
+                message = {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls
+                }
+            else:
+                finish_reason = "stop"
+                message = {
+                    "role": "assistant",
+                    "content": generated_text
+                }
+
             # Construct response
             return {
-                "id": "chatcmpl-defuse",
+                "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": "defuse-llm",
                 "choices": [{
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": generated_text
-                    },
-                    "finish_reason": "stop"
+                    "message": message,
+                    "finish_reason": finish_reason
                 }],
                 "usage": {
                     "prompt_tokens": inputs.input_ids.shape[1],
