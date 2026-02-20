@@ -26,8 +26,8 @@ pruning:
   enabled: true
   layer_topk: "all:0.75"
   masking_step: 0
-  release_step: null
-  ema_decay: null
+  release_step:
+  ema_decay:
   ranking_method: "magnitude"
   prune_strategy: "topk"
   total_prune_percent: 50.0
