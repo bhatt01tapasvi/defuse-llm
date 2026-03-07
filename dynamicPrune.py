@@ -62,6 +62,8 @@ RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 # Rest of the analysis will happen in separate files (existing in src).
 ########
 
+DEFAULT_MAX_TOKENS = 8192
+
 # Print package versions and GPU info
 print('torch', version('torch'))
 print('transformers', version('transformers'))
@@ -186,7 +188,7 @@ def get_best_gpu():
 # Server Classes and Functions
 class GenerateRequest(BaseModel):
     prompt: str
-    max_new_tokens: int = 256
+    max_new_tokens: Optional[int] = None
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 50
@@ -197,7 +199,7 @@ class ChatCompletionRequest(BaseModel):
     messages: List[Dict]
     tools: Optional[List[Dict]] = None
     tool_choice: Optional[str] = None
-    max_tokens: Optional[int] = 256
+    max_tokens: Optional[int] = None
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 50
@@ -206,21 +208,23 @@ class ChatCompletionRequest(BaseModel):
 
 SERVER_MODEL = None
 SERVER_TOKENIZER = None
+SERVER_MAX_TOKENS = DEFAULT_MAX_TOKENS
 
-def start_server(model, tokenizer, host, port):
+def start_server(model, tokenizer, host, port, max_tokens=DEFAULT_MAX_TOKENS):
     if not SERVER_AVAILABLE:
         print("Error: Server modules not available.")
         return
 
-    global SERVER_MODEL, SERVER_TOKENIZER
+    global SERVER_MODEL, SERVER_TOKENIZER, SERVER_MAX_TOKENS
     SERVER_MODEL = model
     SERVER_TOKENIZER = tokenizer
+    SERVER_MAX_TOKENS = max_tokens
 
     app = FastAPI(title="Defuse LLM Server")
 
     @app.post("/v1/completions")
     async def generate_completion(request: GenerateRequest):
-        global SERVER_MODEL, SERVER_TOKENIZER
+        global SERVER_MODEL, SERVER_TOKENIZER, SERVER_MAX_TOKENS
         try:
             inputs = SERVER_TOKENIZER(request.prompt, return_tensors="pt").to(SERVER_MODEL.device)
             
@@ -231,10 +235,12 @@ def start_server(model, tokenizer, host, port):
                 do_sample = False
                 temperature = 1.0  # Temperature is ignored when do_sample=False, but must be > 0
             
+            gen_max_tokens = request.max_new_tokens if request.max_new_tokens is not None else SERVER_MAX_TOKENS
+            
             with torch.no_grad():
                 outputs = SERVER_MODEL.generate(
                     **inputs,
-                    max_new_tokens=request.max_new_tokens,
+                    max_new_tokens=gen_max_tokens,
                     temperature=temperature,
                     top_p=request.top_p,
                     top_k=request.top_k,
@@ -254,7 +260,7 @@ def start_server(model, tokenizer, host, port):
 
     @app.post("/v1/chat/completions")
     async def chat_completion(request: ChatCompletionRequest):
-        global SERVER_MODEL, SERVER_TOKENIZER
+        global SERVER_MODEL, SERVER_TOKENIZER, SERVER_MAX_TOKENS
         try:
             # Apply chat template
             if request.tools:
@@ -290,10 +296,12 @@ def start_server(model, tokenizer, host, port):
                 do_sample = False
                 temperature = 1.0  # Temperature is ignored when do_sample=False, but must be > 0
             
+            chat_max_tokens = request.max_tokens if request.max_tokens is not None else SERVER_MAX_TOKENS
+            
             with torch.no_grad():
                 outputs = SERVER_MODEL.generate(
                     **inputs,
-                    max_new_tokens=request.max_tokens,
+                    max_new_tokens=chat_max_tokens,
                     temperature=temperature,
                     top_p=request.top_p,
                     top_k=request.top_k,
@@ -778,6 +786,7 @@ def main():
             if 'server' in config:
                 defaults['server_host'] = config['server'].get('host', '0.0.0.0')
                 defaults['server_port'] = config['server'].get('port', 8000)
+                defaults['server_max_tokens'] = config['server'].get('max_tokens', DEFAULT_MAX_TOKENS)
                 defaults['server_enabled'] = True
             else:
                 defaults['server_enabled'] = False
@@ -976,7 +985,8 @@ def main():
         print("\n" + "="*80)
         print("STARTING LLM SERVER")
         print("="*80)
-        start_server(model, tokenizer, args.server_host, args.server_port)
+        max_tokens = getattr(args, 'server_max_tokens', DEFAULT_MAX_TOKENS)
+        start_server(model, tokenizer, args.server_host, args.server_port, max_tokens)
         return # Exit main after server stops
 
 
