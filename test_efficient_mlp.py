@@ -1,25 +1,25 @@
 """
-Quick test: verify EfficientMLP works end-to-end with GPT2.
+Quick test: verify EfficientMLP works end-to-end with LLaMA.
 Run on cluster: python test_efficient_mlp.py
 """
 import torch
 import time
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from src.efficient_mlp import replace_mlps, EfficientGPT2MLP
+from src.efficient_mlp import replace_mlps, EfficientLlamaMLP
 
 print("=" * 60)
-print("TEST: EfficientMLP with GPT2")
+print("TEST: EfficientMLP with LLaMA")
 print("=" * 60)
 
 # Load model on single GPU to avoid multi-GPU device issues
 model = AutoModelForCausalLM.from_pretrained(
-    "gpt2", 
+    "meta-llama/Llama-3.1-8B", 
     torch_dtype=torch.float16, 
     cache_dir="llm_weights",
     device_map={"": "cuda:0"}  # Force everything to one GPU
 )
 model.eval()
-tokenizer = AutoTokenizer.from_pretrained("gpt2", cache_dir="llm_weights")
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B", cache_dir="llm_weights")
 
 device = torch.device("cuda:0")
 prompt = "In-memory computing enables parallel processing by performing arithmetic operations directly within memory arrays"
@@ -38,7 +38,7 @@ with torch.no_grad():
 
 # --- Replace MLPs ---
 print("\n--- Phase 2: Replace MLPs with EfficientMLP ---")
-mlp_refs = replace_mlps(model, 'gpt2')
+mlp_refs = replace_mlps(model, 'llama')
 print(f"Replaced {len(mlp_refs)} MLPs")
 
 # Verify full path still produces same output
@@ -55,7 +55,7 @@ with torch.no_grad():
 
 # --- Test reduced path ---
 print("\n--- Phase 3: Test reduced-weight path (50% pruning) ---")
-intermediate_size = model.config.n_inner if model.config.n_inner else 4 * model.config.hidden_size
+intermediate_size = model.config.intermediate_size if model.config.intermediate_size else 4 * model.config.hidden_size
 k = intermediate_size // 2  # Keep 50%
 
 for layer_name, mlp in mlp_refs.items():
@@ -92,7 +92,7 @@ with torch.no_grad():
 
 # --- Timing comparison ---
 print("\n--- Phase 5: Generation speed comparison ---")
-num_tokens = 20
+num_tokens = 1000
 
 # Full path timing
 for mlp in mlp_refs.values():
