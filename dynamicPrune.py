@@ -5,7 +5,6 @@ import sys
 import numpy as np
 import torch
 import json
-from lib import data
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Force unbuffered output to prevent message interleaving in logs
@@ -26,6 +25,7 @@ from src.perplexity_utils import load_corpus, evaluate_on_datasets
 from src.mmlu_utils import get_mmlu_prompt_concat, MMLU_SUBJECTS
 from src.general_nlp_utils import evaluate_general_nlp
 from src.hook_setup import setup_hooks_gpt2, setup_hooks_llama, setup_hooks_qwen3, setup_hooks_mistral, setup_hooks_gpt_neox
+from src.efficient_mlp import replace_mlps, compile_mlps
 
 from src.memoryProfiler import MemoryProfiler, print_gpu_memory_summary, find_large_tensors
 
@@ -393,6 +393,9 @@ def main():
     parser.add_argument('--total_prune_percent', type=float, default=50.0, help='Target total pruning percentage for adaptive pruning (e.g., 50.0 for 50%%)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose output from NeuronDefuser')
 
+    # GPU optimization arguments
+    parser.add_argument('--compile_mlps', action='store_true', help='Apply torch.compile to MLP modules for kernel fusion and CUDA graphs (Tier 1)')
+
     #Knowledge drift arguements
     parser.add_argument('--knowledge_drift', action='store_true', help='Enable knowledge drift evaluation')
 
@@ -453,6 +456,14 @@ def main():
     # Detect model type
     model_type = detect_model_type(model)
     print(f"Detected model type: {model_type.upper()}")
+
+    # Replace MLP modules with EfficientMLP for selective neuron computation (Tier 0+2)
+    mlp_refs = replace_mlps(model, model_type)
+    print(f"EfficientMLP modules installed for {len(mlp_refs)} layers")
+
+    # Tier 1: Apply torch.compile for kernel fusion + CUDA graphs
+    if args.compile_mlps:
+        compile_mlps(model, model_type)
 
     # Select device
     device = torch.device("cuda:0")

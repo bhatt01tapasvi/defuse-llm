@@ -67,7 +67,9 @@ class NeuronDefuser:
         self.ema_max = {}  # Store EMA per layer
         self.ema_mean = {}  # Store EMA per layer
         self.ema_activations = {}  # Store EMA of activations per layer
-        self.masks = {}  # Store per-layer masks
+        self.masks = {}  # Store per-layer masks (legacy, kept for compatibility)
+        self.kept_indices = {}  # Store per-layer kept neuron indices
+        self.efficient_mlps = {}  # Store references to EfficientMLP modules per layer
 
         # Storage for neuron statistics (populated during defuse_neurons)
         self.neuron_stats = {}  # layer_name -> {strong_ids, weakly_strong_ids, weak_count, topk_max, topk_mean}
@@ -113,8 +115,12 @@ class NeuronDefuser:
         if self.verbose:
             print(f"DEBUG ND: Set topk for {layer_name} to {topk_value}")
 
-    def populate_forward_proxy(self, layer_name: str, weight: torch.Tensor, embedding_weights: torch.Tensor):
+    def populate_forward_proxy(self, layer_name: str, weight: torch.Tensor, embedding_weights: torch.Tensor, mlp_module=None):
         self._register_layer(layer_name)
+        
+        # Store reference to EfficientMLP module if provided
+        if mlp_module is not None:
+            self.efficient_mlps[layer_name] = mlp_module
 
         # Ensure tensors are on correct device
         weight = weight.to(self.device)
@@ -175,6 +181,7 @@ class NeuronDefuser:
         self.ema_max = {}
         self.ema_mean = {}
         self.masks = {}
+        self.kept_indices = {}
         self.mlp_impact_history = {}
         self.post_attn_oproj_cache = {}
         self.oproj_counter = {}
@@ -184,6 +191,11 @@ class NeuronDefuser:
         self.attention_max_cosine = {}
         self.attention_threshold = {}
         self.prompt_count += 1
+        
+        # Clear reduced weights in all EfficientMLP modules
+        for lname, mlp in self.efficient_mlps.items():
+            if hasattr(mlp, 'clear_reduced_weights'):
+                mlp.clear_reduced_weights()
         
         # Reset per_layer_topk to original config for fresh adaptive computation
         self.per_layer_topk = {}
@@ -356,6 +368,7 @@ class NeuronDefuser:
                 if self.verbose:
                     print(f"Skipping pruning for layer {layer_num}: {layer_name}")
                 self.masks[layer_name] = None  # No mask means keep all
+                self.kept_indices[layer_name] = None
             else:
                 # Prune this layer
                 combined_score = self._compute_combined_score(
@@ -377,10 +390,21 @@ class NeuronDefuser:
                     topk_indices = topk_indices[sorted_order]
                     topk_values = topk_values[sorted_order]
                 
-                # Create mask: keep only top-K neurons
-                mask = torch.zeros(hidden_dim, dtype=activations3.dtype, device=self.device)
-                mask[topk_indices] = 1.0
-                self.masks[layer_name] = mask
+                # Store kept indices
+                self.kept_indices[layer_name] = topk_indices
+                
+                # Activate efficient reduced-weight computation in EfficientMLP
+                if layer_name in self.efficient_mlps:
+                    mlp = self.efficient_mlps[layer_name]
+                    if hasattr(mlp, 'prepare_reduced_weights'):
+                        mlp.prepare_reduced_weights(topk_indices)
+                        if self.verbose:
+                            print(f"  EfficientMLP: Prepared reduced weights for {layer_name} with {len(topk_indices)} neurons")
+                else:
+                    # Fallback: create mask for legacy hook-based zeroing
+                    mask = torch.zeros(hidden_dim, dtype=activations3.dtype, device=self.device)
+                    mask[topk_indices] = 1.0
+                    self.masks[layer_name] = mask
                 
                 # Store detailed statistics
                 actual_kept = len(topk_indices) if self.prune_strategy == 'auto' else layer_topk
@@ -404,7 +428,12 @@ class NeuronDefuser:
             self.currIteration += 1
             self.globalIteration += 1
 
-        # Apply mask to activations (if mask exists for this layer)
+        # If EfficientMLP is handling this layer, the MLP module itself does reduced computation.
+        # No need to modify activations here — just return unchanged.
+        if layer_name in self.efficient_mlps:
+            return activations3
+        
+        # Legacy fallback: Apply mask to activations (if mask exists for this layer)
         if layer_name in self.masks and self.masks[layer_name] is not None:
             activations3 *= self.masks[layer_name]
         return activations3
