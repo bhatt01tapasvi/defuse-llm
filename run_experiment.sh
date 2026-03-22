@@ -15,13 +15,13 @@
 # CONFIGURATION - Modify these parameters for different experiments
 # ============================================================================
 
-DEVICE=6                  # CUDA device ID
+DEVICE=0                  # CUDA device ID
 
 # Model configuration
 MODE="manual"             # Options: "manual", "auto"
 
 # Knowledge drift configuration
-KNOWLEDGE_DRIFT=true     # Enable knowledge drift evaluation
+KNOWLEDGE_DRIFT=false     # Enable knowledge drift evaluation
 
 #MODEL="mistralai/Mistral-7B-Instruct-v0.3"
 #MODEL="EleutherAI/gpt-neox-20b"
@@ -39,24 +39,25 @@ SAVE_MODEL=""             # Path to save the model (leave empty to skip)
 
 # Prompt configuration
 PROMPT_TYPE="mmlu"           # Options: "custom", "mmlu"
-PROMPT_SUBJECT="astronomy business_ethics college_computer_science college_mathematics world_religions high_school_mathematics econometrics global_facts electrical_engineering high_school_statistics formal_logic abstract_algebra professional_accounting international_law high_school_biology high_school_world_history marketing philosophy professional_law professional_medicine"           # For custom: "imc", "pizzas", "actress", etc.
+PROMPT_SUBJECT="astronomy"           # For custom: "imc", "pizzas", "actress", etc.
 # Allow override from SUBJECT_OVERRIDE environment variable, otherwise use default
 #PROMPT_SUBJECT="${SUBJECT_OVERRIDE:-astronomy}"  # For custom: "imc", "pizzas", "actress", etc.
                                # For mmlu: "college_computer_science", etc.
-PROMPT_LENGTH="10000"               # Leave empty for None (no prompt length limit)
+PROMPT_LENGTH="100"               # Leave empty for None (no prompt length limit)
 CUSTOM_PROMPT_TEXT=""        # Custom prompt text (leave empty to use prompt_subject)
 
 # Pruning configuration
 ## Uncomment and set these for specific pruning, comment the set below
 #LAYER_TOPK="all:auto"
 #LAYER_TOPK="0:0.8393,1:0.2061,2:0.1579,3:0.1,4:0.6976,5:0.9,6:0.8389,7:0.6754,8:0.6302,9:0.4709,10:0.3876,11:0.1,12:0.1,13:0.1,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.896"
-LAYER_TOPK_3_2_3B_50="0:0.8936,1:0.7314,2:0.7152,3:0.6910,4:0.8804,5:0.9000,6:0.8936,7:0.8790,8:0.8749,9:0.8210,10:0.8928,11:0.8862,12:0.8911,13:0.8346,14:0.8372,15:0.8579,16:0.1000,17:0.1000,18:0.1000,19:0.1000,20:0.1000,21:0.1000,22:0.1000,23:0.1000,24:0.1000,25:0.289,26:0.536,27:0.8996"
-LAYER_TOPK_3_2_3B_10="all:0.9"
-LAYER_TOPK_3_2_3B_20="0:0.9,1:0.9,2:0.9,3:0.9,4:0.9,5:0.9,6:0.9,7:0.9,8:0.9,9:0.9,10:0.9,11:0.8837,12:0.8851,13:0.8692,14:0.8418,15:0.7633,16:0.7261,17:0.6921,18:0.6702,19:0.6063,20:0.5579,21:0.555,22:0.605,23:0.5902,24:0.6854,25:0.7979,26:0.8706,27:0.9"
-LAYER_TOPK_3_2_3B_30="0:0.9,1:0.8781,2:0.8707,3:0.8597,4:0.9,5:0.9,6:0.9,7:0.9,8:0.9,9:0.9,10:0.9,11:0.8121,12:0.8144,13:0.7887,14:0.7445,15:0.6176,16:0.5576,17:0.5026,18:0.4673,19:0.364,20:0.2858,21:0.2811,22:0.3619,23:0.3379,24:0.4917,25:0.6735,26:0.7909,27:0.9"
-LAYER_TOPK_3_2_3B_40="0:0.9,1:0.8284,2:0.818,3:0.8025,4:0.9,5:0.9,6:0.9,7:0.9,8:0.9,9:0.8856,10:0.8676,11:0.7356,12:0.7388,13:0.7026,14:0.6404,15:0.4619,16:0.3774,17:0.3001,18:0.2503,19:0.1113,20:0.1127,21:0.1127,22:0.1113,23:0.1117,24:0.2847,25:0.5405,26:0.7058,27:0.9"
-LAYER_TOPK_3_2_3B_60="0:0.8769,1:0.5529,2:0.5258,3:0.4855,4:0.829,5:0.9,6:0.8767,7:0.8172,8:0.7917,9:0.702,10:0.6551,11:0.311,12:0.3193,13:0.2252,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.2334,27:0.8985"
-LAYER_TOPK_3_2_3B_70="0:0.8393,1:0.2061,2:0.1579,3:0.1,4:0.6976,5:0.9,6:0.8389,7:0.6754,8:0.6302,9:0.4709,10:0.3876,11:0.1,12:0.1,13:0.1,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.896"
+
+# LAYER_TOPK_3_2_3B_50="0:0.8936,1:0.7314,2:0.7152,3:0.6910,4:0.8804,5:0.9000,6:0.8936,7:0.8790,8:0.8749,9:0.8210,10:0.8928,11:0.8862,12:0.8911,13:0.8346,14:0.8372,15:0.8579,16:0.1000,17:0.1000,18:0.1000,19:0.1000,20:0.1000,21:0.1000,22:0.1000,23:0.1000,24:0.1000,25:0.289,26:0.536,27:0.8996"
+# LAYER_TOPK_3_2_3B_10="all:0.9"
+# LAYER_TOPK_3_2_3B_20="0:0.9,1:0.9,2:0.9,3:0.9,4:0.9,5:0.9,6:0.9,7:0.9,8:0.9,9:0.9,10:0.9,11:0.8837,12:0.8851,13:0.8692,14:0.8418,15:0.7633,16:0.7261,17:0.6921,18:0.6702,19:0.6063,20:0.5579,21:0.555,22:0.605,23:0.5902,24:0.6854,25:0.7979,26:0.8706,27:0.9"
+# LAYER_TOPK_3_2_3B_30="0:0.9,1:0.8781,2:0.8707,3:0.8597,4:0.9,5:0.9,6:0.9,7:0.9,8:0.9,9:0.9,10:0.9,11:0.8121,12:0.8144,13:0.7887,14:0.7445,15:0.6176,16:0.5576,17:0.5026,18:0.4673,19:0.364,20:0.2858,21:0.2811,22:0.3619,23:0.3379,24:0.4917,25:0.6735,26:0.7909,27:0.9"
+# LAYER_TOPK_3_2_3B_40="0:0.9,1:0.8284,2:0.818,3:0.8025,4:0.9,5:0.9,6:0.9,7:0.9,8:0.9,9:0.8856,10:0.8676,11:0.7356,12:0.7388,13:0.7026,14:0.6404,15:0.4619,16:0.3774,17:0.3001,18:0.2503,19:0.1113,20:0.1127,21:0.1127,22:0.1113,23:0.1117,24:0.2847,25:0.5405,26:0.7058,27:0.9"
+# LAYER_TOPK_3_2_3B_60="0:0.8769,1:0.5529,2:0.5258,3:0.4855,4:0.829,5:0.9,6:0.8767,7:0.8172,8:0.7917,9:0.702,10:0.6551,11:0.311,12:0.3193,13:0.2252,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.2334,27:0.8985"
+# LAYER_TOPK_3_2_3B_70="0:0.8393,1:0.2061,2:0.1579,3:0.1,4:0.6976,5:0.9,6:0.8389,7:0.6754,8:0.6302,9:0.4709,10:0.3876,11:0.1,12:0.1,13:0.1,14:0.1,15:0.1,16:0.1,17:0.1,18:0.1,19:0.1,20:0.1,21:0.1,22:0.1,23:0.1,24:0.1,25:0.1,26:0.1,27:0.896"
 
 
 LAYER_TOPK_3_1_8B="0:0.8864,1:0.7743,2:0.7547,3:0.7199,4:0.7534,5:0.8033,6:0.7902,7:0.7423,8:0.7213,9:0.6537,10:0.648,11:0.6309,12:0.6044,13:0.5859,14:0.5832,15:0.5181,16:0.4282,17:0.3293,18:0.2601,19:0.2263,20:0.1817,21:0.1186,22:0.1015,23:0.101,24:0.101,25:0.1095,26:0.1104,27:0.2221,28:0.3671,29:0.5515,30:0.7218,31:0.9"
@@ -69,15 +70,15 @@ LAYER_TOPK_3_1_8B_70="0:0.7828,1:0.5686,2:0.5311,3:0.4646,4:0.5286,5:0.624,6:0.5
 #LAYER_TOPK=${LAYER_TOPK_3_1_8B}              # Layer-specific top-k configuration (leave empty for None)
 #LAYER_TOPK="0:0.9000,1:0.8243,2:0.7220,3:0.7199,4:0.7737,5:0.7675,6:0.7837,7:0.7053,8:0.6681,9:0.6317,10:0.6626,11:0.5000,12:0.5605,13:0.5175,14:0.4466,15:0.3437,16:0.2510,17:0.2469,18:0.2169,19:0.1345,20:0.1006,21:0.1006,22:0.1006,23:0.1006,24:0.2689,25:0.4198,26:0.6324,27:0.9000"              # Layer-specific top-k configuration (leave empty for None)
 #LAYER_TOPK="0:0.9000,1:0.9,2:0.8,3:0.8,4:0.8,5:0.8,6:0.8,7:0.7053,8:0.7,9:0.6317,10:0.6626,11:0.5000,12:0.5605,13:0.5175,14:0.45,15:0.35,16:0.25,17:0.25,18:0.21,19:0.14,20:0.1006,21:0.1006,22:0.1006,23:0.1006,24:0.9,25:0.9,26:0.9,27:0.9000"              # Layer-specific top-k configuration (leave empty for None)
-LAYER_TOPK=""
+LAYER_TOPK="all:0.5"
 
-MASKING_STEP=""
+MASKING_STEP=0
 RELEASE_STEP=""              # Step at which to release masked neurons (leave empty for None)
-GENERATION=0
+GENERATION=2000
 EMA_DECAY=""
 RANKING_METHOD="magnitude"
 PRUNE_STRATEGY="topk"
-TOTAL_PRUNE_PERCENT=0.0
+TOTAL_PRUNE_PERCENT=50.0
 VERBOSE=true                 # Enable verbose output from NeuronDefuser
 
 ## Comment these out when pruning.
@@ -92,7 +93,7 @@ VERBOSE=true                 # Enable verbose output from NeuronDefuser
 SAVE_ACTIVATIONS=false       # Set to true to save activations (uses more memory)
 
 # Evaluation configuration - Perplexity
-EVAL_PERPLEXITY=true           # Set to true to enable perplexity evaluation
+EVAL_PERPLEXITY=false           # Set to true to enable perplexity evaluation
 PPL_DATASETS="wikitext2"          # Options: "custom", "mmlu" (space-separated)
 PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology high_school_world_history marketing philosophy professional_law"             # Subjects for perplexity evaluation (space-separated)
 #PPL_SUBJECTS="college_computer_science abstract_algebra high_school_biology virology high_school_world_history marketing philosophy professional_law world_religions business_ethics moral_disputes machine_learning"             # Subjects for perplexity evaluation (space-separated)
@@ -116,8 +117,8 @@ GENERAL_NLP_DATASETS="boolq"        # Options: "boolq rte hellaswag winogrande a
 GENERAL_NLP_MAX_SAMPLES=10     # Max samples for general NLP eval (leave empty for all)
 
 # Results directory
-EXPERIMENT_NAME=${TOTAL_PRUNE_PERCENT}_prune
-BASE_RESULTS_DIR="/users/grad/abhishektyagi/wanda/wanda/results/lm_eval_all/perplexity"
+EXPERIMENT_NAME=${TOTAL_PRUNE_PERCENT}_prune # Add a different name for each experiment
+BASE_RESULTS_DIR=""
 MODEL_SAFE_NAME=$(echo "$MODEL" | sed 's/\//_/g')  # Replace / with _
 RESULTS_DIR="${BASE_RESULTS_DIR}/${MODEL_SAFE_NAME}/${EXPERIMENT_NAME}"
 
