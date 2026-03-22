@@ -104,7 +104,7 @@ import gc
 #         weight = block.mlp.c_proj.weight.data
 #         if save_activations:
 #             mlp2_forward_proxy[f'layer_{i}'] = (weight @ embedding_weights.T).detach().cpu().numpy()
-#         neuronDefuser.populate_forward_proxy(f'layer_{i}', weight, embedding_weights)
+#         neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight, embedding_weights)
         
 #         del weight
 #         torch.cuda.empty_cache()
@@ -296,7 +296,7 @@ import gc
 #             #mlp1_weights[f'layer_{i}'] = layer.mlp.gate_proj.weight.data.detach().cpu().numpy()
 #             mlp2_weights[f'layer_{i}'] = weight.detach().cpu().numpy()
 #             mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()  # (intermediate_size, vocab_size)
-#         neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights)
+#         neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight.T, embedding_weights)
         
 #         del weight
 #         torch.cuda.empty_cache()
@@ -417,7 +417,7 @@ def setup_hooks_gpt2(model, neuronDefuser, pre_ln1_activations, pre_attn_activat
         weight = block.mlp.c_proj.weight.data
         if save_activations:
             mlp2_forward_proxy[f'layer_{i}'] = (weight @ embedding_weights.T).detach().cpu().numpy()
-        neuronDefuser.populate_forward_proxy(f'layer_{i}', weight, embedding_weights, mlp_module=block.mlp)
+        neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight, embedding_weights, mlp_module=block.mlp)
         
         del weight
         torch.cuda.empty_cache()
@@ -609,7 +609,7 @@ def setup_hooks_mistral(model, neuronDefuser, pre_ln1_activations, pre_attn_acti
         if save_activations:
             mlp2_weights[f'layer_{i}'] = weight.detach().cpu().numpy()
             mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()
-        neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
+        neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
         
         del weight
         torch.cuda.empty_cache()
@@ -801,7 +801,7 @@ def setup_hooks_llama(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
             #mlp1_weights[f'layer_{i}'] = layer.mlp.gate_proj.weight.data.detach().cpu().numpy()
             mlp2_weights[f'layer_{i}'] = weight.detach().cpu().numpy()
             mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()  # (intermediate_size, vocab_size)
-        neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
+        neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
         
         del weight
         torch.cuda.empty_cache()
@@ -995,7 +995,7 @@ def setup_hooks_qwen3(model, neuronDefuser, pre_ln1_activations, pre_attn_activa
         if save_activations:
             mlp2_weights[f'layer_{i}'] = weight.detach().cpu().numpy()
             mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()
-        neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
+        neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
         
         del weight
         torch.cuda.empty_cache()
@@ -1181,7 +1181,7 @@ def setup_hooks_gpt_neox(model, neuronDefuser, pre_ln1_activations, pre_attn_act
         if save_activations:
             mlp2_weights[f'layer_{i}'] = weight.detach().cpu().numpy()
             mlp2_forward_proxy[f'layer_{i}'] = (weight.T @ embedding_weights.T).detach().cpu().numpy()
-        neuronDefuser.populate_forward_proxy(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
+        neuronDefuser.prepare_layer_pruning_data(f'layer_{i}', weight.T, embedding_weights, mlp_module=layer.mlp)
         
         del weight
         torch.cuda.empty_cache()

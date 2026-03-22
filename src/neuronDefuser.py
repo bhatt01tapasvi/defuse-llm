@@ -67,7 +67,6 @@ class NeuronDefuser:
         self.ema_max = {}  # Store EMA per layer
         self.ema_mean = {}  # Store EMA per layer
         self.ema_activations = {}  # Store EMA of activations per layer
-        self.masks = {}  # Store per-layer masks (legacy, kept for compatibility)
         self.kept_indices = {}  # Store per-layer kept neuron indices
         self.efficient_mlps = {}  # Store references to EfficientMLP modules per layer
 
@@ -115,19 +114,24 @@ class NeuronDefuser:
         if self.verbose:
             print(f"DEBUG ND: Set topk for {layer_name} to {topk_value}")
 
-    def populate_forward_proxy(self, layer_name: str, weight: torch.Tensor, embedding_weights: torch.Tensor, mlp_module=None):
+    def prepare_layer_pruning_data(self, layer_name: str, weight: torch.Tensor, embedding_weights: torch.Tensor, mlp_module=None):
         self._register_layer(layer_name)
         
         # Store reference to EfficientMLP module if provided
         if mlp_module is not None:
             self.efficient_mlps[layer_name] = mlp_module
 
+        # Skip expensive forward proxy computation when using magnitude ranking
+        # (magnitude only uses raw activation scores, not proxy-weighted scores)
+        if self.ranking_method == 'magnitude':
+            return
+
         # Ensure tensors are on correct device
         weight = weight.to(self.device)
         embedding_weights = embedding_weights.to(self.device)
 
         # Calculate forward proxy and keep it on GPU
-        forward_proxy = (weight @ embedding_weights.T).detach()  # Remove .cpu().numpy()
+        forward_proxy = (weight @ embedding_weights.T).detach()
         self.forward_proxies_max[layer_name] = torch.max(torch.abs(forward_proxy), dim=1)[0]
         self.forward_proxies_mean[layer_name] = torch.mean(torch.abs(forward_proxy), dim=1)
         
@@ -141,17 +145,19 @@ class NeuronDefuser:
             return torch.zeros_like(scores)
         return (scores - min_val) / (max_val - min_val)
 
-    def _compute_combined_score(self, act_score: torch.Tensor, max_scores: torch.Tensor, 
-                                mean_scores: torch.Tensor) -> torch.Tensor:
+    def _compute_combined_score(self, act_score: torch.Tensor, max_scores: torch.Tensor = None, 
+                                mean_scores: torch.Tensor = None) -> torch.Tensor:
         # If using L2 norm (ema_decay is None), the scores are sum of squares
         # Take sqrt to get actual L2 norm
         if self.ema_decay is None:
             act_score = torch.sqrt(act_score)
-            max_scores = torch.sqrt(max_scores)
-            mean_scores = torch.sqrt(mean_scores)
+            if max_scores is not None:
+                max_scores = torch.sqrt(max_scores)
+            if mean_scores is not None:
+                mean_scores = torch.sqrt(mean_scores)
         
         if self.ranking_method == 'magnitude':
-            # Use absolute mean scores
+            # Use absolute activation scores (no proxy needed)
             return act_score
         elif self.ranking_method == 'max':
             return max_scores
@@ -180,7 +186,6 @@ class NeuronDefuser:
         self.ema_activations = {}
         self.ema_max = {}
         self.ema_mean = {}
-        self.masks = {}
         self.kept_indices = {}
         self.mlp_impact_history = {}
         self.post_attn_oproj_cache = {}
@@ -207,11 +212,6 @@ class NeuronDefuser:
     def defuse_neurons(self, layer_name: str, activations3: torch.Tensor):
         """
         Deactivates neurons in the activations tensor that have mean activation below the threshold.
-        
-        TODO: There are two appraoches here:
-        We process each new token in each forward pass. 
-        Or we process all the tokens in one go just before we have to start masking and then judge what we need and what we don't.
-        For now, I am implementing the first approach.
         """
         
         # No masking step defined or past release step - return unchanged
@@ -221,7 +221,8 @@ class NeuronDefuser:
         batch_size, seq_len, hidden_dim = activations3.shape
 
         # Check if this is the last layer (for counter increment)
-        is_last_layer = (layer_name == list(self.forward_proxies_max.keys())[-1])
+        registered_layers = list(self.layer_name_to_number.keys())
+        is_last_layer = (layer_name == registered_layers[-1])
 
         #Release step means no more masking!
         if self.releaseStep is not None and self.currIteration >= self.releaseStep:
@@ -230,14 +231,11 @@ class NeuronDefuser:
                 self.globalIteration += 1
             return activations3
         
-        # Between maskingStep and releaseStep - apply masks
+        # Between maskingStep and releaseStep - EfficientMLP handles reduced computation automatically
         if self.currIteration > self.maskingStep and self.currIteration < (self.releaseStep if self.releaseStep is not None else float('inf')):
             if is_last_layer:
                 self.currIteration += 1
                 self.globalIteration += 1
-
-            if layer_name in self.masks and self.masks[layer_name] is not None:
-                return activations3 * self.masks[layer_name]
             return activations3
 
         
@@ -250,11 +248,13 @@ class NeuronDefuser:
         # Replacing the iteration count with this layer_name check because at the very first iteration, either it's a
         # new prompt with many tokens prefill or it's a reset state hit for new mask.
         if layer_name not in self.ema_activations:
-            # Multiply activations with proxy values (broadcasting)
-            last_gen_forward_proxy_max = torch.abs(activations) * self.forward_proxies_max[layer_name]
-            last_gen_forward_proxy_mean = torch.abs(activations) * self.forward_proxies_mean[layer_name]
-            
-            seq_length = last_gen_forward_proxy_max.shape[0]
+            seq_length = activations.shape[0]
+
+            # Compute proxy-weighted scores only when needed (not for magnitude ranking)
+            need_proxy = self.ranking_method != 'magnitude'
+            if need_proxy:
+                last_gen_forward_proxy_max = torch.abs(activations) * self.forward_proxies_max[layer_name]
+                last_gen_forward_proxy_mean = torch.abs(activations) * self.forward_proxies_mean[layer_name]
 
             # Check if ema_decay is None (use L2 norm aggregation)
             if self.ema_decay is None:
@@ -263,12 +263,13 @@ class NeuronDefuser:
                 self.ema_activations[layer_name] = torch.sum(
                     torch.abs(activations) ** 2, dim=0
                 )
-                self.ema_max[layer_name] = torch.sum(
-                    last_gen_forward_proxy_max ** 2, dim=0
-                )
-                self.ema_mean[layer_name] = torch.sum(
-                    last_gen_forward_proxy_mean ** 2, dim=0
-                )
+                if need_proxy:
+                    self.ema_max[layer_name] = torch.sum(
+                        last_gen_forward_proxy_max ** 2, dim=0
+                    )
+                    self.ema_mean[layer_name] = torch.sum(
+                        last_gen_forward_proxy_mean ** 2, dim=0
+                    )
             else:
                 # Apply exponential weighting
                 weights = self.ema_decay ** torch.arange(seq_length - 1, -1, -1, 
@@ -280,48 +281,53 @@ class NeuronDefuser:
                     torch.abs(activations) * weights.unsqueeze(1), 
                     dim=0
                 )
-                self.ema_max[layer_name] = torch.sum(
-                    last_gen_forward_proxy_max * weights.unsqueeze(1), 
-                    dim=0
-                )
-                self.ema_mean[layer_name] = torch.sum(
-                    last_gen_forward_proxy_mean * weights.unsqueeze(1), 
-                    dim=0
-                )
+                if need_proxy:
+                    self.ema_max[layer_name] = torch.sum(
+                        last_gen_forward_proxy_max * weights.unsqueeze(1), 
+                        dim=0
+                    )
+                    self.ema_mean[layer_name] = torch.sum(
+                        last_gen_forward_proxy_mean * weights.unsqueeze(1), 
+                        dim=0
+                    )
 
         elif self.currIteration < self.maskingStep: # When currIter == maskingStep, we make the final update and mask, then don't compute ema again.
-            # Multiply activations with proxy values (broadcasting)
-            last_gen_forward_proxy_max = torch.abs(activations[-1]) * self.forward_proxies_max[layer_name]  # Shape: (embed_dim,)
-            last_gen_forward_proxy_mean = torch.abs(activations[-1]) * self.forward_proxies_mean[layer_name]
             last_gen_activations = torch.abs(activations[-1])
+            
+            # Compute proxy-weighted scores only when needed (not for magnitude ranking)
+            need_proxy = self.ranking_method != 'magnitude'
+            if need_proxy:
+                last_gen_forward_proxy_max = torch.abs(activations[-1]) * self.forward_proxies_max[layer_name]
+                last_gen_forward_proxy_mean = torch.abs(activations[-1]) * self.forward_proxies_mean[layer_name]
             
             # Check if ema_decay is None (use L2 norm accumulation)
             if self.ema_decay is None:
                 # L2 norm accumulation: add new squared values to sum of squares
-                # sum_of_squares_new = sum_of_squares_old + new_value^2
                 self.ema_activations[layer_name] = (
                     self.ema_activations[layer_name] + last_gen_activations ** 2
                 )
-                self.ema_max[layer_name] = (
-                    self.ema_max[layer_name] + last_gen_forward_proxy_max ** 2
-                )
-                self.ema_mean[layer_name] = (
-                    self.ema_mean[layer_name] + last_gen_forward_proxy_mean ** 2
-                )
+                if need_proxy:
+                    self.ema_max[layer_name] = (
+                        self.ema_max[layer_name] + last_gen_forward_proxy_max ** 2
+                    )
+                    self.ema_mean[layer_name] = (
+                        self.ema_mean[layer_name] + last_gen_forward_proxy_mean ** 2
+                    )
             else:
                 # Update EMA: ema_new = decay * ema_old + (1 - decay) * new_value
                 self.ema_activations[layer_name] = (
                     self.ema_decay * self.ema_activations[layer_name] + 
                     (1 - self.ema_decay) * last_gen_activations
                 )
-                self.ema_max[layer_name] = (
-                    self.ema_decay * self.ema_max[layer_name] + 
-                    (1 - self.ema_decay) * last_gen_forward_proxy_max
-                )
-                self.ema_mean[layer_name] = (
-                    self.ema_decay * self.ema_mean[layer_name] + 
-                    (1 - self.ema_decay) * last_gen_forward_proxy_mean
-                )
+                if need_proxy:
+                    self.ema_max[layer_name] = (
+                        self.ema_decay * self.ema_max[layer_name] + 
+                        (1 - self.ema_decay) * last_gen_forward_proxy_max
+                    )
+                    self.ema_mean[layer_name] = (
+                        self.ema_decay * self.ema_mean[layer_name] + 
+                        (1 - self.ema_decay) * last_gen_forward_proxy_mean
+                    )
 
         # Keep a count of the iteration we are at.
         if self.currIteration < self.maskingStep:
@@ -367,14 +373,13 @@ class NeuronDefuser:
                 # Don't prune this layer - keep all neurons
                 if self.verbose:
                     print(f"Skipping pruning for layer {layer_num}: {layer_name}")
-                self.masks[layer_name] = None  # No mask means keep all
                 self.kept_indices[layer_name] = None
             else:
                 # Prune this layer
                 combined_score = self._compute_combined_score(
                     act_score=self.ema_activations[layer_name],
-                    max_scores=self.ema_max[layer_name], 
-                    mean_scores=self.ema_mean[layer_name]
+                    max_scores=self.ema_max.get(layer_name), 
+                    mean_scores=self.ema_mean.get(layer_name)
                 )
                 
                 # Get top-K neurons based on combined ranking
@@ -394,17 +399,10 @@ class NeuronDefuser:
                 self.kept_indices[layer_name] = topk_indices
                 
                 # Activate efficient reduced-weight computation in EfficientMLP
-                if layer_name in self.efficient_mlps:
-                    mlp = self.efficient_mlps[layer_name]
-                    if hasattr(mlp, 'prepare_reduced_weights'):
-                        mlp.prepare_reduced_weights(topk_indices)
-                        if self.verbose:
-                            print(f"  EfficientMLP: Prepared reduced weights for {layer_name} with {len(topk_indices)} neurons")
-                else:
-                    # Fallback: create mask for legacy hook-based zeroing
-                    mask = torch.zeros(hidden_dim, dtype=activations3.dtype, device=self.device)
-                    mask[topk_indices] = 1.0
-                    self.masks[layer_name] = mask
+                mlp = self.efficient_mlps[layer_name]
+                mlp.prepare_reduced_weights(topk_indices)
+                if self.verbose:
+                    print(f"  EfficientMLP: Prepared reduced weights for {layer_name} with {len(topk_indices)} neurons")
                 
                 # Store detailed statistics
                 actual_kept = len(topk_indices) if self.prune_strategy == 'auto' else layer_topk
@@ -428,14 +426,6 @@ class NeuronDefuser:
             self.currIteration += 1
             self.globalIteration += 1
 
-        # If EfficientMLP is handling this layer, the MLP module itself does reduced computation.
-        # No need to modify activations here — just return unchanged.
-        if layer_name in self.efficient_mlps:
-            return activations3
-        
-        # Legacy fallback: Apply mask to activations (if mask exists for this layer)
-        if layer_name in self.masks and self.masks[layer_name] is not None:
-            activations3 *= self.masks[layer_name]
         return activations3
 
     def cache_pre_mlp(self, layer_name, activation):
@@ -1056,98 +1046,3 @@ class NeuronDefuser:
         print(f"  Top-K Neurons: {topk_json_file}")
         print(f"  Cosine History: {cosine_history_file}")
         print(f"{'='*80}\n")
-
-
-## COMMENTED PORTION FOR L1
-#
-        #     if self.ema_decay is None:
-        #         # L1 normalize per token (across neurons), then L2 aggregate across tokens
-                
-        #         # L1 norm for activations: divide by sum of absolute values per token
-        #         l1_norm_act = torch.sum(torch.abs(activations), dim=1, keepdim=True) + 1e-12
-        #         activations_l1_normalized = torch.abs(activations) / l1_norm_act
-                
-        #         # L1 norm for max proxy: divide by sum per token
-        #         l1_norm_max = torch.sum(torch.abs(last_gen_forward_proxy_max), dim=1, keepdim=True) + 1e-12
-        #         max_l1_normalized = last_gen_forward_proxy_max / l1_norm_max
-                
-        #         # L1 norm for mean proxy: divide by sum per token
-        #         l1_norm_mean = torch.sum(torch.abs(last_gen_forward_proxy_mean), dim=1, keepdim=True) + 1e-12
-        #         mean_l1_normalized = last_gen_forward_proxy_mean / l1_norm_mean
-                
-        #         # L2 norm: sqrt(sum of squares) for each neuron across tokens
-        #         self.ema_activations[layer_name] = torch.sqrt(
-        #             torch.sum(activations_l1_normalized ** 2, dim=0)
-        #         )
-        #         self.ema_max[layer_name] = torch.sqrt(
-        #             torch.sum(max_l1_normalized ** 2, dim=0)
-        #         )
-        #         self.ema_mean[layer_name] = torch.sqrt(
-        #             torch.sum(mean_l1_normalized ** 2, dim=0)
-        #         )
-        #     else:
-        #         # L1 normalize per token before applying exponential weighting
-                
-        #         # L1 norm for activations
-        #         l1_norm_act = torch.sum(torch.abs(activations), dim=1, keepdim=True) + 1e-12
-        #         activations_l1_normalized = torch.abs(activations) / l1_norm_act
-                
-        #         # L1 norm for max proxy
-        #         l1_norm_max = torch.sum(torch.abs(last_gen_forward_proxy_max), dim=1, keepdim=True) + 1e-12
-        #         max_l1_normalized = last_gen_forward_proxy_max / l1_norm_max
-                
-        #         # L1 norm for mean proxy
-        #         l1_norm_mean = torch.sum(torch.abs(last_gen_forward_proxy_mean), dim=1, keepdim=True) + 1e-12
-        #         mean_l1_normalized = last_gen_forward_proxy_mean / l1_norm_mean
-                
-        #         # Apply exponential weighting to L1-normalized values
-        #         weights = self.ema_decay ** torch.arange(seq_length - 1, -1, -1, 
-        #                                               dtype=torch.float32, 
-        #                                               device=self.device)
-
-        #         weights = weights / weights.sum()
-        #         self.ema_activations[layer_name] = torch.sum(
-        #             activations_l1_normalized * weights.unsqueeze(1), 
-        #             dim=0
-        #         )
-        #         self.ema_max[layer_name] = torch.sum(
-        #             max_l1_normalized * weights.unsqueeze(1), 
-        #             dim=0
-        #         )
-        #         self.ema_mean[layer_name] = torch.sum(
-        #             mean_l1_normalized * weights.unsqueeze(1), 
-        #             dim=0
-        #         )
-
-        # elif self.currIteration <= self.maskingStep: # When currIter == maskingStep, we make the final update and mask, then don't compute ema again.
-        #     # Multiply activations with proxy values (broadcasting)
-        #     last_gen_forward_proxy_max = torch.abs(activations[-1]) * self.forward_proxies_max[layer_name]
-        #     last_gen_forward_proxy_mean = torch.abs(activations[-1]) * self.forward_proxies_mean[layer_name]
-            
-        #     # Check if ema_decay is None (use L2 norm accumulation)
-        #     if self.ema_decay is None:
-        #         # L1 normalize the new token's values
-        #         l1_norm_max = torch.sum(torch.abs(last_gen_forward_proxy_max)) + 1e-12
-        #         max_l1_normalized = last_gen_forward_proxy_max / l1_norm_max
-                
-        #         l1_norm_mean = torch.sum(torch.abs(last_gen_forward_proxy_mean)) + 1e-12
-        #         mean_l1_normalized = last_gen_forward_proxy_mean / l1_norm_mean
-                
-        #         # L2 norm accumulation: sqrt(sum_old^2 + new_normalized^2)
-        #         self.ema_max[layer_name] = torch.sqrt(
-        #             self.ema_max[layer_name] ** 2 + max_l1_normalized ** 2
-        #         )
-        #         self.ema_mean[layer_name] = torch.sqrt(
-        #             self.ema_mean[layer_name] ** 2 + mean_l1_normalized ** 2
-        #         )
-        #     else:
-        #         # L1 normalize before EMA update
-        #         l1_norm_max = torch.sum(torch.abs(last_gen_forward_proxy_max)) + 1e-12
-        #         max_l1_normalized = last_gen_forward_proxy_max / l1_norm_max
-                
-        #         l1_norm_mean = torch.sum(torch.abs(last_gen_forward_proxy_mean)) + 1e-12
-        #         mean_l1_normalized = last_gen_forward_proxy_mean / l1_norm_mean
-                
-        #         # Update EMA with L1-normalized values: ema_new = decay * ema_old + (1 - decay) * new_normalized
-        #         self.ema_max[layer_name] = self.ema_decay * self.ema_max[layer_name] + (1 - self.ema_decay) * max_l1_normalized
-        #         self.ema_mean[layer_name] = self.ema_decay * self.ema_mean[layer_name] + (1 - self.ema_decay) * mean_l1_normalized
