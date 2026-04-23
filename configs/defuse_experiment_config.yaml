@@ -8,16 +8,16 @@ experiment:
   seed: 0
 
 model:
-  name: "Qwen/Qwen3-4B"
+  name: "mistralai/Mistral-7B-Instruct-v0.3"
   # Other options:
-  # name: "mistralai/Mistral-7B-Instruct-v0.3"
+  # name: "Qwen/Qwen3-4B"
   # name: "EleutherAI/gpt-neox-20b"
   # name: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
   # name: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
   # name: "Qwen/Qwen3-14B-Base"
   # name: "meta-llama/Llama-2-7b-hf"
-  
-  cache_dir: "/home/naren/naren_research/Beyond-Discrete-Personas/naren_research/personality-trait-enhancing/ollama-personality-finetuning/stock-hf-models/Qwen3-4B"
+
+  cache_dir: null  # set HF_CACHE_DIR env var or leave null to use ~/.cache/huggingface/hub
   save_path: null  # Path to save the model (leave null to skip)
   save_activations: false
 
