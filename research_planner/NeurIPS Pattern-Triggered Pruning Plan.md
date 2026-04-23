@@ -927,3 +927,34 @@ This gives a meaningful range to measure compliance reduction from pruning.
 helpful on safe prompts. The Safety Selectivity Index baseline is well-defined.
 
 **Recommendation: proceed to Phase 3 (activation collection).**
+
+### Tapasvi: Phase 3 (Activation Collection) Instructions
+
+**Status: PENDING**
+
+Naren and Abhishek have reviewed the Phase 2 baseline. The 68% compliance signal is strong enough to proceed to Phase 3. 
+
+Tapasvi, please execute Phase 3 using the following approach:
+
+#### 1. Create a Dedicated Script (`src/collect_activations.py`)
+Do not modify `dynamicPrune.py` or `dense_baseline.py`. Instead, create a new script heavily inspired by `dense_baseline.py` to cleanly process the pilot prompts without entangling it with other pipelines.
+
+#### 2. Hook Setup
+- Load `datasets/pilot_safety_selectivity/pilot_prompts.jsonl`.
+- Load the model: `mistralai/Mistral-7B-Instruct-v0.3`.
+- Initialize `NeuronDefuser` and attach hooks using `src.hook_setup.setup_hooks_mistral(..., save_activations=True)`.
+
+#### 3. Execution & Extraction
+For each prompt:
+- Run a forward pass to generate exactly 1 new token (`max_new_tokens=1`). We only need the prompt tokens and the *first* generated token.
+- Extract `pre_mlp2_activations` for all layers from the hook dictionaries.
+- Slice the tensors to get the three required vectors:
+  - `mean_prompt_act`: average over the sequence dimension up to `prompt_len`.
+  - `last_prompt_act`: activation at `prompt_len - 1`.
+  - `first_gen_act`: activation at `prompt_len`.
+- **Crucial:** Clear the `pre_mlp2_activations` dictionary and free GPU memory after each prompt to prevent OOM errors.
+
+#### 4. Dual Storage Format
+Please save the activations in *both* formats to ensure crash redundancy and fast downstream loading:
+1. **Individual Files (Redundancy):** Save a `.pt` file per prompt in `results/pilot_safety_selectivity/activations/individual/` (e.g., `harmbench_0001.pt`).
+2. **Aggregated Matrix (Speed):** Maintain an in-memory dictionary/list of all prompt activations. At the end of the script, save the entire aggregated object to `results/pilot_safety_selectivity/activations/pilot_activations_aggregated.pt`. This aggregated file will be used for Phase 4 to prevent disk I/O bottlenecks.
