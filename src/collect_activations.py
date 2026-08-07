@@ -19,11 +19,20 @@ For each prompt, captures the input to each layer's MLP down_proj
 No full response is generated — this is two forward passes per prompt
 (prefill + one decode step), not the 256-token generation used in Phase 2.
 
+Dual storage, per Naren's Phase 3 instructions (research_planner/NeurIPS
+Pattern-Triggered Pruning Plan.md, "Tapasvi: Phase 3 (Activation Collection)
+Instructions"):
+  1. Individual files (redundancy) — one .pt per prompt.
+  2. Aggregated matrix (speed) — one .pt with all prompts stacked, for Phase 4.
+
 Inputs:  datasets/pilot_safety_selectivity/pilot_prompts.jsonl
-Outputs: results/pilot_safety_selectivity/activations/<prompt_id>.pt
+Outputs: results/pilot_safety_selectivity/activations/individual/<prompt_id>.pt
+         results/pilot_safety_selectivity/activations/pilot_activations_aggregated.pt
          results/pilot_safety_selectivity/activation_manifest.jsonl
 
-Resume: safe to re-run — prompt_ids with an existing .pt file are skipped.
+Resume: safe to re-run — prompt_ids with an existing individual .pt file are
+skipped for capture; the aggregated file is always rebuilt from whatever
+individual files exist on disk.
 """
 
 import json
@@ -79,7 +88,8 @@ SYSTEM_PROMPT = "You are a helpful assistant."
 
 IN_FILE = Path("datasets/pilot_safety_selectivity/pilot_prompts.jsonl")
 OUT_DIR = Path("results/pilot_safety_selectivity")
-ACT_DIR = OUT_DIR / "activations"
+ACT_DIR = OUT_DIR / "activations" / "individual"
+AGGREGATE_FILE = OUT_DIR / "activations" / "pilot_activations_aggregated.pt"
 MANIFEST_FILE = OUT_DIR / "activation_manifest.jsonl"
 
 
@@ -132,6 +142,38 @@ def load_done_ids(act_dir: Path) -> set:
     return {p.stem for p in act_dir.glob("*.pt")}
 
 
+def build_aggregate(act_dir: Path, aggregate_file: Path) -> None:
+    """Stack every individual .pt file into one indexable tensor per
+    activation type, for fast Phase 4 loading (avoids 300 separate disk reads).
+    """
+    files = sorted(act_dir.glob("*.pt"))
+    if not files:
+        print("No individual activation files found; skipping aggregate build.")
+        return
+
+    fields = ["prompt_id", "dataset", "split", "category", "safety_label",
+              "model_name", "prompt_len", "first_generated_token_id"]
+    meta = {k: [] for k in fields}
+    last_prompt_token, mean_prompt_tokens, first_generated_token = [], [], []
+
+    for f in tqdm(files, desc="Aggregating"):
+        rec = torch.load(f)
+        for k in fields:
+            meta[k].append(rec[k])
+        last_prompt_token.append(rec["last_prompt_token"])
+        mean_prompt_tokens.append(rec["mean_prompt_tokens"])
+        first_generated_token.append(rec["first_generated_token"])
+
+    aggregate = {
+        **meta,
+        "last_prompt_token": torch.stack(last_prompt_token),      # [N, num_layers, intermediate_size]
+        "mean_prompt_tokens": torch.stack(mean_prompt_tokens),    # [N, num_layers, intermediate_size]
+        "first_generated_token": torch.stack(first_generated_token),  # [N, num_layers, intermediate_size]
+    }
+    torch.save(aggregate, aggregate_file)
+    print(f"Saved aggregate ({len(files)} prompts): {aggregate_file}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -152,6 +194,7 @@ def main():
 
     if not remaining:
         print("All prompts already captured.")
+        build_aggregate(ACT_DIR, AGGREGATE_FILE)
         return
 
     print(f"\nLoading model: {MODEL_NAME}")
@@ -238,6 +281,8 @@ def main():
 
     print(f"\nSaved {len(remaining)} activation files to {ACT_DIR}")
     print(f"Manifest: {MANIFEST_FILE}")
+
+    build_aggregate(ACT_DIR, AGGREGATE_FILE)
 
 
 if __name__ == "__main__":

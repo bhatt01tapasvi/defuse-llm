@@ -41,7 +41,7 @@ After Phase 3, report results to Naren and Abhishek.
 |------|---------|
 | `src/pilot_dataset.py` | Phase 1: build pilot prompt JSONL |
 | `src/dense_baseline.py` | Phase 2: run dense model, compute metrics |
-| `src/activation_capture.py` | Phase 3: capture FFN down_proj activations per prompt |
+| `src/collect_activations.py` | Phase 3: capture FFN down_proj activations per prompt |
 | `configs/defuse_experiment_config.yaml` | Model config (Mistral path) |
 | `research_planner/NeurIPS Pattern-Triggered Pruning Plan.md` | Full research plan |
 
@@ -52,7 +52,8 @@ datasets/pilot_safety_selectivity/pilot_prompts.jsonl
 datasets/pilot_safety_selectivity/dataset_stats.json
 results/pilot_safety_selectivity/dense_baseline_generations.jsonl
 results/pilot_safety_selectivity/dense_baseline_metrics.json
-results/pilot_safety_selectivity/activations/<prompt_id>.pt
+results/pilot_safety_selectivity/activations/individual/<prompt_id>.pt
+results/pilot_safety_selectivity/activations/pilot_activations_aggregated.pt
 results/pilot_safety_selectivity/activation_manifest.jsonl
 ```
 

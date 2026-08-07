@@ -14,7 +14,8 @@ scope boundary in `CLAUDE.md`.
 - Dataset stats: `datasets/pilot_safety_selectivity/dataset_stats.json`
 - Dense baseline output: `results/pilot_safety_selectivity/dense_baseline_generations.jsonl`
 - Metrics summary: `results/pilot_safety_selectivity/dense_baseline_metrics.json`
-- Activation files (one per prompt): `results/pilot_safety_selectivity/activations/<prompt_id>.pt`
+- Activation files (one per prompt): `results/pilot_safety_selectivity/activations/individual/<prompt_id>.pt`
+- Activation aggregate (all prompts stacked, for Phase 4): `results/pilot_safety_selectivity/activations/pilot_activations_aggregated.pt`
 - Activation manifest: `results/pilot_safety_selectivity/activation_manifest.jsonl`
 
 ## Dense Baseline Metrics (Mistral-7B-Instruct-v0.3)
@@ -48,15 +49,45 @@ No pruning and no full-response generation were done — just prefill + one
 decode step per prompt, matching the Phase 3 spec in the plan doc exactly
 (`research_planner/NeurIPS Pattern-Triggered Pruning Plan.md:616-629`).
 
-Implementation: `src/activation_capture.py`, self-contained forward-hook
-capture (not reusing `src/hook_setup.py`/`src/neuronDefuser.py`, since that
-infra is coupled to the separate pruning-focused framework in this repo and
-Phase 3 explicitly excludes pruning). Resumable — skips prompt_ids that
-already have a `.pt` file.
+Implementation: `src/collect_activations.py`. Follows your Phase 3
+instructions (`ea2e1fc`, picked up late — `origin` was unreachable when
+Tapasvi started this work, see note below) on script naming and dual
+storage (individual `.pt` per prompt under `activations/individual/`, plus
+one aggregated `activations/pilot_activations_aggregated.pt` with all 300
+prompts stacked per activation type for fast Phase 4 loading).
 
-Verified: 300/300 `.pt` files written, 300/300 manifest rows, activations
-distinct across the three capture points (spot-checked via smoke test on 2
-prompts before the full run), 789 MB total on disk.
+One deliberate deviation from those instructions: activation capture uses
+self-contained forward hooks, not `src.hook_setup.setup_hooks_mistral()` +
+`NeuronDefuser`. Reason: that hook's down_proj pre-hook unconditionally
+calls `neuronDefuser.defuse_neurons()` on the tensor that continues through
+the forward pass (`src/hook_setup.py:507-517`, "CRITICAL: For mlp_down, we
+MUST defuse neurons"). `defuse_neurons()` (`src/neuronDefuser.py:195`) is a
+stateful masking/pruning function needing precomputed `forward_proxies_max`/
+`forward_proxies_mean` and EMA state — getting it into a verified no-op
+"dense" mode isn't a flag flip, and if misconfigured it would silently prune
+the very activations Phase 3 needs to capture *without* pruning (the plan
+doc's own Phase 3 goal). Tapasvi wrote a minimal hook that only reads
+`down_proj`'s input and does not touch the forward pass, to avoid that risk.
+Happy to switch to the shared hook infra if you can point to the exact
+`NeuronDefuser` init args that make `defuse_neurons()` a guaranteed no-op.
+
+Resumable — skips prompt_ids that already have an individual `.pt` file;
+the aggregate is rebuilt from whatever's on disk each run.
+
+Verified: 300/300 individual `.pt` files, 300/300 manifest rows, aggregate
+file shape `[300, 32, 14336]` per activation type (matches prompt count ×
+layer count × intermediate size), activations distinct across the three
+capture points (spot-checked via smoke test on 2 prompts before the full
+run). 789 MB individual + 788 MB aggregate on disk.
+
+### Note on `ea2e1fc`
+
+This commit (your Phase 3 instructions doc update, pushed to `origin`
+several days ago) wasn't visible to Tapasvi until today — `origin`
+(`ATygah/defuse-llm`) was returning "repository not found" when this
+session started, and the cached `origin/naren_research` ref predated your
+push. Once access came back, this reconciliation was done in the same
+session. Worth checking whether `origin` access dropped for others too.
 
 ## Question for Naren
 
