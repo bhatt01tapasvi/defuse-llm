@@ -1,12 +1,10 @@
-# Progress — Tapasvi (Phase 1 + Phase 2 + Phase 3)
+# Progress — Tapasvi (Phase 1 + Phase 2 + Phase 3; Phase 4 Authorized)
 
-## Status: Phase 1 + Phase 2 + Phase 3 COMPLETE. Holding at scope boundary.
+## Status: Phase 1 + Phase 2 + Phase 3 COMPLETE. Phase 4 authorized.
 
-Per `CLAUDE.md`, Tapasvi's scope is Phase 1, Phase 2, and Phase 3 only
-(Phase 3 approved by Naren via WhatsApp, 2026-07-31, after reviewing Phase 2
-results below). All three are done and verified on disk. No Phase 4 work
-(linear probes / separability analysis) has been started, per the explicit
-scope boundary in `CLAUDE.md`.
+Per `CLAUDE.md`, Tapasvi's scope now includes Phase 4 only. Phase 1-3 are
+done and verified on disk. Naren authorized Phase 4 on 2026-08-07; Phase 5+
+remain out of scope unless Naren explicitly approves them.
 
 ## Files
 
@@ -89,17 +87,19 @@ session started, and the cached `origin/naren_research` ref predated your
 push. Once access came back, this reconciliation was done in the same
 session. Worth checking whether `origin` access dropped for others too.
 
-## Question for Naren
+## Handoff: Phase 4 Only (Authorized by Naren, 2026-08-07)
 
-Phase 3 activation capture is done and sitting on disk, unexamined —
-Tapasvi has not looked at separability, run any probes, or touched pruning,
-per the Phase 4+ scope block in `CLAUDE.md`.
+Run Phase 4 pattern-separability analysis using the Phase 3 activation
+artifacts. Do not modify the capture pipeline or implement any pruning,
+interventions, or Phase 5+ work.
 
-**Naren — how should Tapasvi proceed?**
+1. Evaluate a centroid-similarity detector and a regularized logistic-regression
+   linear probe for harmful versus benign prompts.
+2. Use the existing train/validation/test splits; do not tune on the test set.
+3. Evaluate each activation point and layer. Report AUROC, accuracy, precision,
+   recall, and false-positive rate on XSTest.
+4. Save reproducible analysis code and the resulting metrics/figures under
+   `results/pilot_safety_selectivity/`.
 
-- Cleared to start Phase 4 (pattern separability: centroid similarity +
-  logistic regression probe, per-layer AUROC/accuracy/precision/recall/FPR)?
-- Hold and wait for you + Abhishek to review the captured activations first?
-- Anything to change about the Phase 3 capture (which activation points,
-  which layers, fp16 vs fp32, prompt-only vs including a longer generation
-  window) before Phase 4 work begins?
+After completing Phase 4, stop and report the results to Naren and Abhishek.
+Do not start Phase 5 (static pruning) without Naren's explicit approval.

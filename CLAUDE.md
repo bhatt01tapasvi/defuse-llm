@@ -19,21 +19,22 @@ conda run -n tapasvi-env python <script>
 conda activate tapasvi-env && python <script>
 ```
 
-## Scope Boundary — NEVER go beyond Phase 3
+## Scope Boundary — NEVER go beyond Phase 4
 
-Tapasvi owns Phase 1, Phase 2, and Phase 3 only.
+Tapasvi owns Phase 1, Phase 2, Phase 3, and Phase 4 only.
 
 Phase 1: dataset setup → `datasets/pilot_safety_selectivity/pilot_prompts.jsonl`
 Phase 2: dense baseline → `results/pilot_safety_selectivity/dense_baseline_generations.jsonl`
 Phase 3: activation collection (approved by Naren via WhatsApp, 2026-07-31, after
 reviewing Phase 2 results — see `progress.md`)
+Phase 4: pattern separability analysis (approved by Naren, 2026-08-07)
 
 DO NOT implement:
-- Linear probes (Phase 4)
 - Static or pattern-triggered pruning (Phase 5-6)
 - Causal experiments (Phase 7)
 
-After Phase 3, report results to Naren and Abhishek.
+After Phase 4, stop and report results to Naren and Abhishek. Do not begin
+Phase 5 unless Naren explicitly approves it.
 
 ## Key Files
 
