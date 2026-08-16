@@ -103,3 +103,64 @@ interventions, or Phase 5+ work.
 
 After completing Phase 4, stop and report the results to Naren and Abhishek.
 Do not start Phase 5 (static pruning) without Naren's explicit approval.
+
+## Phase 4: Pattern Separability — COMPLETE
+
+Implementation: `src/collect_activations.py` output ->
+`src/pattern_separability.py`. Trains a centroid-similarity detector and a
+regularized logistic-regression probe per (activation point, layer), on the
+existing train/val/test splits (train=180, val=60, test=60; harmful=100,
+benign=200), no tuning on test. Also a `--summary-only` flag to rebuild the
+report from `separability_metrics.json` without refitting.
+
+Outputs: `results/pilot_safety_selectivity/separability_metrics.json`,
+`results/pilot_safety_selectivity/separability_summary.md`.
+
+### Headline result
+
+Best test-set probe AUROC: **1.000** (`last_prompt_token`, layer 18),
+XSTest FPR 0.000. Separability across mid/late layers is strong and
+consistent with the plan's expected result (harmful vs. benign is
+linearly decodable from FFN activations).
+
+### Caveat I did not want to bury in a clean number
+
+Layer 0's `down_proj` input already gets 0.954 probe AUROC. Layer 0 is
+essentially a function of token embeddings — that score is available from
+surface lexical form alone, before the model does any real computation.
+Combined with the fact that every harmful prompt in the pilot set comes
+from HarmBench while benign comes from JailbreakBench + XSTest, a probe
+can score well by learning *which corpus a prompt came from*, not whether
+it's harmful. This is Risk 1 in the plan doc verbatim.
+
+So I ran the plan's own mitigation ("train on one dataset, test on
+another"): train with JailbreakBench as the only benign source, then
+measure the false-positive rate on XSTest — a benign corpus the probe
+never saw during training. Full per-layer table is in
+`separability_summary.md`; headline:
+
+| activation point | layer-0 AUROC (in-dist) | layer-0 FPR (unseen source) | best-layer FPR (unseen source) |
+|---|---|---|---|
+| last_prompt_token | 0.954 | 0.100 | 0.000 (layer 3) |
+| mean_prompt_tokens | 0.969 | 0.060 | 0.020 |
+| first_generated_token | 0.909 | 0.140 | 0.070 |
+
+Separability survives the source shift — FPR stays low or hits 0 at the
+right layer — so this isn't purely a corpus-identity artifact. But there's
+a second finding worth flagging directly: **the layer with the best
+in-distribution AUROC is not the layer that holds up under source shift.**
+For `last_prompt_token`, layer 18 has the best in-dist AUROC (1.000) but a
+0.170 unseen-source FPR — worse than layer 0's 0.100, and far worse than
+layer 3's 0.000. Picking a trigger layer by in-distribution AUROC alone
+would pick one of the worst layers for over-refusal risk on prompts
+outside the training distribution — directly relevant to Phase 5-6 trigger
+design, so flagging now rather than after that work starts.
+
+### Question for Naren
+
+- OK to report this as-is (both the strong separability and the layer-0 /
+  cross-source caveats), or do you want a larger/more diverse benign set
+  before calling Phase 4 conclusive?
+- For Phase 5-6 (not starting without your approval): should trigger-layer
+  selection use the cross-source FPR criterion instead of in-distribution
+  AUROC, given the finding above?
