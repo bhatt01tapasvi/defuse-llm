@@ -156,11 +156,30 @@ would pick one of the worst layers for over-refusal risk on prompts
 outside the training distribution — directly relevant to Phase 5-6 trigger
 design, so flagging now rather than after that work starts.
 
-### Question for Naren
+### Tapasvi follow-up checklist (authorized evaluation work only)
 
-- OK to report this as-is (both the strong separability and the layer-0 /
-  cross-source caveats), or do you want a larger/more diverse benign set
-  before calling Phase 4 conclusive?
-- For Phase 5-6 (not starting without your approval): should trigger-layer
-  selection use the cross-source FPR criterion instead of in-distribution
-  AUROC, given the finding above?
+Tapasvi should complete the following evaluation follow-ups, update the saved
+metrics and reports, and then stop. These tasks do **not** authorize pruning,
+interventions, Phase 5+, or any expansion of the experiment scope.
+
+- [ ] Locate or restore the saved baseline-generation and activation artifacts
+  required for the evaluations below; do not regenerate target-model outputs
+  unless the existing artifacts cannot be recovered and Naren approves a rerun.
+- [ ] Re-score all existing HarmBench dense-baseline generations with the official
+  HarmBench classifier. Replace the current headline harmful-compliance proxy
+  (inverse phrase-based refusal detection) with the classifier result, retain
+  the phrase heuristic only as a diagnostic, and use the HarmBench classifier
+  for every future evaluation condition.
+- [ ] Score all existing JailbreakBench-benign and XSTest dense-baseline
+  generations using the finalized `Qwen/Qwen3-8B` safe-response rubric in
+  `research_planner/NeurIPS Pattern-Triggered Pruning Plan.md`. Save the
+  per-example results and complete the required manual audit.
+- [ ] After classifier re-scoring, run an output-grounded separability check:
+  test whether Phase 3/4 activation features predict whether the model actually
+  gives harmful help according to the HarmBench classifier, rather than only
+  whether a prompt belongs to the harmful source. Report it separately from
+  prompt-type separability and do not claim compliance separability without it.
+- [ ] Run the reverse source-shift control before treating Phase 4 as
+  conclusive: train on HarmBench + XSTest, then measure false-positive rates
+  on the held-out benign JailbreakBench source. This complements the completed
+  HarmBench + JailbreakBench → XSTest check.
