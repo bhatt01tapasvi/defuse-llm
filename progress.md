@@ -285,3 +285,93 @@ badly on the former.
   forward as a documented constraint into Phase 5-6 design?
 - Manual audit of the 71-row sample in `benign_judge_audit_sample.jsonl`
   needs a human — can you or someone on the team do this, or should it wait?
+
+## Phases 5-6 paired pruning evaluation — authorized by Naren (2026-08-26)
+
+Proceed as a paired experiment: Phase 5 first defines and tests a fixed static
+pruning mask; Phase 6 then applies that same mask only when the current
+activation detector fires. Use the official HarmBench classifier for harmful
+compliance and record the existing benign helpfulness and over-refusal metrics
+for both conditions. Do not claim safety selectivity or deployment readiness:
+the detector's poor held-out JailbreakBench-benign performance remains a known
+limitation, to be addressed later with broader topic-adjacent benign data. Do
+not begin Phase 7 or later work without further approval.
+
+### Tapasvi handoff — frozen execution protocol
+
+**Scope.** Run the paired experiment only. Phase 5 uses an always-on, fixed
+FFN-channel mask. Phase 6 uses the *same* fixed mask only when a prompt-time
+activation detector fires. Do not implement Phase 7, change the datasets, or
+claim deployment readiness or safety selectivity.
+
+**Data and split discipline.** Locate the existing pilot generations,
+activations, HarmBench classifier labels, and Qwen safe-response labels. Use
+only the fixed `train` split to derive harmful-channel ranks and fit detector
+weights. Use only `val` to choose the pruned layer, sparsity, detector
+activation point/layer, and threshold. Freeze all choices before generating
+or scoring `test`; never select a configuration because it performs best on
+test. The prior reported layer-12 detector was selected by test AUROC and
+must not be adopted as the Phase 6 trigger without this validation-only
+selection procedure.
+
+**Harmful-channel ranking.** Use the `last_prompt_token` FFN activations.
+Within each layer, score channel \(j\) on the training split as:
+
+```text
+mean_abs_activation(actual HarmBench-classifier compliance)
+− mean_abs_activation(all non-compliance and safe examples)
+```
+
+The positive class is the official HarmBench classifier's `yes` verdict, not
+the prompt's source dataset. A higher score is more harmful-associated; prune
+the highest-scoring channels.
+
+**Layer and sparsity selection.** Rank channels in every one of the 32 FFN
+layers. On validation, test harmful-associated static masks one layer at a
+time at 10%, 20%, 30%, and 50% channel sparsity. Select one layer and one
+sparsity by the lowest validation HarmBench-classifier harmful-compliance
+rate; if tied, prefer the smaller sparsity, then the lower benign refusal
+rate. Freeze that layer, sparsity, and fixed channel mask for the test and
+Phase 6 conditions. For Mistral's 14,336 channels per FFN layer, the four
+levels mask 1,434, 2,867, 4,301, and 7,168 channels respectively.
+
+**Phase 5 test conditions.** At the selected layer and sparsity, generate and
+score: (1) dense, (2) random-channel pruning, (3) magnitude pruning, and
+(4) harmful-associated pruning. Random pruning must use three fixed masks
+(seeds 11, 23, and 42), each masking the same number of channels in the same
+layer; report every seed and their mean. Magnitude pruning masks the same
+number of channels with the lowest frozen score:
+
+```text
+sqrt(||gate_proj[j, :]||_2^2 + ||up_proj[j, :]||_2^2 + ||down_proj[:, j]||_2^2)
+```
+
+This group-norm baseline is motivated by structured neuron pruning literature:
+Scardapane et al., 2016 ([arXiv:1607.00485](https://arxiv.org/abs/1607.00485))
+and the LLM FFN channel-removal formulation in 2SSP
+([preprint](https://openreview.net/pdf/3339d1582f06e020cf9a154c3b76756c15612685.pdf)).
+
+**Phase 6 trigger.** Fit logistic-regression detector candidates on the train
+split using the output-grounded labels above. Choose its activation point,
+layer, and threshold solely on validation, then freeze them. For every test
+prompt, first run a dense prefill to obtain the prompt-time detector score.
+If the frozen threshold is met, regenerate using the fixed Phase 5
+harmful-associated mask for the response; otherwise use the dense response.
+Do not create a prompt-specific mask and do not retune the threshold on test.
+
+**Evaluation.** Keep the target model, system prompt, decoding settings, and
+prompt splits identical in all conditions. Score all HarmBench outputs with
+`cais/HarmBench-Llama-2-13b-cls`. Score all JailbreakBench-benign and XSTest
+outputs with the frozen Qwen3-8B rubric. Save every prompt, generation, mask
+ID, pruning configuration, detector score/decision, and per-example judge
+result. Produce audit samples for the Qwen judge but do not fabricate human
+audit labels; manual review remains required before publication-quality benign
+claims.
+
+**Report.** Provide one complete table per test condition with HarmBench
+harmful-compliance and refusal rates, JailbreakBench-benign helpfulness and
+inappropriate-refusal rates, XSTest helpfulness and over-refusal rates,
+unhelpful/off-topic rates, and mean output length. Report random-seed results
+separately, not only the best seed. Explain that the detector's 0.54–0.98
+held-out JailbreakBench-benign FPR makes Phase 6 exploratory; it is not a
+safe deployment mechanism until broader topic-adjacent benign data are added.

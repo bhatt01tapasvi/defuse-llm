@@ -723,6 +723,18 @@ false positive rate on XSTest
 
 ### Phase 5: Static Pruning Sanity Check
 
+#### Authorization and reporting constraint (2026-08-26)
+
+Naren authorized a paired Phase 5-6 evaluation: first perform static pruning
+to define and test a fixed neuron mask, then evaluate that same mask in the
+Phase 6 detector-triggered condition. Use the official HarmBench classifier as
+the headline harmful-compliance scorer. Record the existing safe-prompt
+metrics alongside both conditions, but do not present the results as
+safety-selective or deployment-ready: the detector's poor held-out
+JailbreakBench-benign performance is a known limitation. Expand the
+topic-adjacent benign data later before making a selectivity claim. This
+authorization does not include Phase 7+ work.
+
 Goal:
 
 Test whether harmful-associated FFN neuron pruning beats random pruning.
@@ -732,6 +744,29 @@ Neuron score:
 ```text
 score_neuron = mean_abs_activation_harmful - mean_abs_activation_benign
 ```
+
+### Frozen magnitude-pruning control (2026-08-26)
+
+For a Mistral SwiGLU FFN channel \(j\), define the magnitude-baseline score:
+
+```text
+magnitude_score(j) = sqrt(
+    ||gate_proj[j, :]||_2^2
+  + ||up_proj[j, :]||_2^2
+  + ||down_proj[:, j]||_2^2
+)
+```
+
+Prune channels with the *lowest* scores. This is a structured-magnitude
+baseline: it treats all weights belonging to one FFN channel as a group, rather
+than pruning unrelated individual weights. It is an explicit implementation
+choice for Mistral's three-projection SwiGLU FFN, not a claim that this exact
+formula is uniquely standard. Useful references: Scardapane et al. (2016),
+which applies group-level regularization to all weights outgoing from a unit
+([arXiv:1607.00485](https://arxiv.org/abs/1607.00485)); and 2SSP's structured
+LLM neuron pruning, which removes the corresponding `gate_proj`/`up_proj` rows
+and `down_proj` column for an FFN neuron
+([preprint](https://openreview.net/pdf/3339d1582f06e020cf9a154c3b76756c15612685.pdf)).
 
 Sparsity sweep:
 
