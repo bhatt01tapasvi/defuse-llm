@@ -162,24 +162,126 @@ Tapasvi should complete the following evaluation follow-ups, update the saved
 metrics and reports, and then stop. These tasks do **not** authorize pruning,
 interventions, Phase 5+, or any expansion of the experiment scope.
 
-- [ ] Locate or restore the saved baseline-generation and activation artifacts
+- [x] Locate or restore the saved baseline-generation and activation artifacts
   required for the evaluations below; do not regenerate target-model outputs
   unless the existing artifacts cannot be recovered and Naren approves a rerun.
-- [ ] Re-score all existing HarmBench dense-baseline generations with the official
+  — All Phase 2/3 artifacts were intact on disk; nothing regenerated.
+- [x] Re-score all existing HarmBench dense-baseline generations with the official
   HarmBench classifier. Replace the current headline harmful-compliance proxy
   (inverse phrase-based refusal detection) with the classifier result, retain
   the phrase heuristic only as a diagnostic, and use the HarmBench classifier
-  for every future evaluation condition.
-- [ ] Score all existing JailbreakBench-benign and XSTest dense-baseline
+  for every future evaluation condition. — Done, see below.
+- [x] Score all existing JailbreakBench-benign and XSTest dense-baseline
   generations using the finalized `Qwen/Qwen3-8B` safe-response rubric in
   `research_planner/NeurIPS Pattern-Triggered Pruning Plan.md`. Save the
-  per-example results and complete the required manual audit.
-- [ ] After classifier re-scoring, run an output-grounded separability check:
+  per-example results and complete the required manual audit. — Scoring done.
+  **Manual audit NOT done** — see "Outstanding: manual audit" below.
+- [x] After classifier re-scoring, run an output-grounded separability check:
   test whether Phase 3/4 activation features predict whether the model actually
   gives harmful help according to the HarmBench classifier, rather than only
   whether a prompt belongs to the harmful source. Report it separately from
   prompt-type separability and do not claim compliance separability without it.
-- [ ] Run the reverse source-shift control before treating Phase 4 as
+  — Done, see below.
+- [x] Run the reverse source-shift control before treating Phase 4 as
   conclusive: train on HarmBench + XSTest, then measure false-positive rates
   on the held-out benign JailbreakBench source. This complements the completed
-  HarmBench + JailbreakBench → XSTest check.
+  HarmBench + JailbreakBench → XSTest check. — Done, see below; result is not clean.
+
+## Evaluation Follow-Up Results (2026-08-24 checklist, completed by Tapasvi)
+
+### 1. HarmBench re-score (`src/harmbench_rescore.py`, `cais/HarmBench-Llama-2-13b-cls`)
+
+| Metric | Phrase heuristic (old headline) | HarmBench classifier (new headline) |
+|---|---|---|
+| HarmBench harmful compliance rate | 0.68 | **0.45** |
+| HarmBench refusal rate | 0.32 | **0.55** |
+
+Agreement between the two scorers: 73%. The phrase heuristic overestimated
+compliance — some responses that don't match a refusal phrase still don't
+actually carry out the harmful behavior per the classifier (e.g. vague or
+non-actionable answers). `dense_baseline_metrics.json` now reports the
+classifier numbers as headline, phrase heuristic kept as a diagnostic field
+(`harmbench_diagnostic_phrase_heuristic_refusal_rate`,
+`..._vs_classifier_agreement`). 0/100 unparseable classifier outputs.
+
+### 2. Benign-response judge (`src/benign_response_judge.py`, `Qwen/Qwen3-8B`)
+
+| Metric | Phrase heuristic (old headline) | Qwen3-8B judge (new headline) |
+|---|---|---|
+| JailbreakBench-benign refusal/inappropriate-refusal rate | 0.00 | **0.21** |
+| XSTest over-refusal rate | 0.04 | **0.10** |
+
+This is a bigger correction than the HarmBench one. The Phase 1+2 report's
+claim of "0% benign refusal... confirm the model is helpful on safe prompts"
+does not hold up — the model inappropriately refuses roughly 1 in 5
+JailbreakBench-benign prompts and 1 in 10 XSTest prompts once judged by
+something more capable than phrase matching. Full label distribution:
+JailbreakBench-benign {helpful: 64, inappropriate_refusal: 21,
+unhelpful_or_off_topic: 15}; XSTest {helpful: 77, inappropriate_refusal: 10,
+unhelpful_or_off_topic: 13}. 0/200 unparseable, 0 retries needed.
+`dense_baseline_metrics.json` updated with judge numbers as headline, phrase
+heuristic demoted to diagnostic (`..._diagnostic_phrase_heuristic_vs_judge_agreement`:
+0.79 for JBB, 0.86 for XSTest).
+
+### Outstanding: manual audit (not completed by Tapasvi)
+
+The checklist requires manually auditing every `inappropriate_refusal` label
+plus 20 random examples per other non-empty label, then reporting agreement
+with the Qwen judge. **This step needs an actual human reviewer and was not
+completed** — an LLM re-labeling its own judge's output would not be an
+independent check, so I did not simulate it. What's done instead:
+`results/pilot_safety_selectivity/benign_judge_audit_sample.jsonl` (71 rows:
+all 31 inappropriate_refusal + 20 random helpful + 20 random
+unhelpful_or_off_topic) has empty `human_label`/`human_notes` fields ready
+for Tapasvi or Naren to fill in by hand. Please treat the judge-based benign
+metrics above as provisional until that audit happens.
+
+### 3. Output-grounded separability (`src/pattern_separability.py`, item 4)
+
+Everything in the original Phase 4 report used *prompt source* (came from
+HarmBench) as the positive class. Redefining positives as "the HarmBench
+classifier says this generation actually complied" (45 real positives out of
+100 HarmBench prompts, per the re-score) and re-running the same detectors:
+
+| | source-label best (original) | output-grounded best |
+|---|---|---|
+| Best probe AUROC (test) | 1.000 (last_prompt_token, layer 18) | **0.909** (last_prompt_token, layer 12) |
+
+A real drop, not a collapse. Some of the original 1.000 was corpus-identity
+signal as suspected, but activation features still separate actual harmful
+compliance from everything else reasonably well (0.909 AUROC, 0.000 XSTest
+FPR at the best layer). Full per-point table in `separability_summary.md`.
+
+### 4. Reverse source-shift control (`src/pattern_separability.py`, item 5)
+
+This is the finding I'd flag most strongly. The original cross-source check
+(train HarmBench+JailbreakBench, hold out XSTest) gave FPR near 0 at the best
+layer — looked clean. Running it the other direction — **train
+HarmBench+XSTest, hold out JailbreakBench-benign** — gives FPR **0.54–0.98**
+even at the best layer, across all three activation points. The detector
+generalizes fine to XSTest but badly misclassifies JailbreakBench-benign as
+harmful once it's excluded from training.
+
+This is the opposite conclusion from the first direction and should not be
+averaged away. My read: JailbreakBench-benign prompts are deliberately
+topic-matched to jailbreak-style harmful requests (that's the point of that
+dataset — testing whether refusal tracks topic sensitivity rather than actual
+harm), so they sit much closer to the harmful class in activation space than
+XSTest does. A detector that never sees JBB-benign during training has no way
+to learn that boundary. Practical implication for Phase 5-6 trigger design:
+whatever benign calibration set gets used, it needs to include
+topic-adjacent-but-safe prompts like JailbreakBench-benign, not just XSTest-style
+lexical-ambiguity cases — a detector tuned only on the latter will over-refuse
+badly on the former.
+
+## Question for Naren
+
+- The Phase 1+2 "0% benign refusal" claim doesn't survive judge re-scoring
+  (21% on JBB-benign). Want the Phase 1+2 report section itself corrected, or
+  is this progress.md note sufficient for now?
+- Reverse source-shift result (0.54-0.98 FPR holding out JBB-benign) is a
+  genuine red flag for any future trigger design, not just a footnote. Should
+  this block Phase 4 from being called "conclusive," or is it enough to carry
+  forward as a documented constraint into Phase 5-6 design?
+- Manual audit of the 71-row sample in `benign_judge_audit_sample.jsonl`
+  needs a human — can you or someone on the team do this, or should it wait?
